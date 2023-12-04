@@ -3,7 +3,6 @@ use logisim_common as logisim;
 use logisim::app::App;
 use logisim::glam::{uvec2, vec2, UVec2, Vec2};
 use logisim::input::{InputEvent as LogisimInputEvent, InputState, PtrButton, TextInputState};
-use logisim::Perf;
 
 use android_activity::{
     input::{InputEvent, KeyAction, KeyEvent, KeyMapChar, MotionAction},
@@ -45,36 +44,6 @@ pub extern "C" fn Java_com_logisim_android_MainActivity_onDisplayInsets(
     BOTTOM_DISPLAY_INSET.store(array[2], Ordering::Relaxed);
     LEFT_DISPLAY_INSET.store(array[3], Ordering::Relaxed);
     log::info!("Settings DISPLAY_INSETS to {array:?}");
-}
-
-#[derive(Clone, Debug)]
-struct Timer {
-    per_second: u32,
-    last_reset: SystemTime,
-}
-impl Timer {
-    fn new(per_second: u32) -> Self {
-        Self {
-            per_second,
-            last_reset: SystemTime::now(),
-        }
-    }
-
-    fn until_ready(&self) -> Duration {
-        let ready_time = self.last_reset + Duration::from_millis(1000 / self.per_second as u64);
-        // ready_time might not be in the future
-        ready_time
-            .duration_since(SystemTime::now())
-            .unwrap_or(Duration::ZERO)
-    }
-
-    fn ready(&self) -> bool {
-        self.until_ready().as_millis() == 0
-    }
-
-    fn reset(&mut self) {
-        self.last_reset = SystemTime::now();
-    }
 }
 
 #[derive(Clone)]
@@ -138,6 +107,7 @@ impl TouchTranslater {
     }
 
     fn phase_start(&mut self, id: i32, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
+        log::info!("Started motion: {id}");
         self.device_id = Some(id);
         out(LogisimInputEvent::Hover(pos));
         out(LogisimInputEvent::Press(pos, PtrButton::LEFT));
@@ -180,7 +150,6 @@ struct State {
     combining_accent: Option<char>,
     window: Option<Window>,
     quit: bool,
-    redraw: bool,
     running: bool,
     app: App,
     android: AndroidApp,
@@ -196,58 +165,46 @@ fn android_main(android: AndroidApp) {
         .filter_module("logisim_common", log::LevelFilter::Info)
         .filter_module("main", log::LevelFilter::Info)
         .init();
-    let mut frame_timer = Timer::new(60);
-
-    log::trace!("ANDROID_MAIN (TRACE)");
-    log::info!("ANDROID_MAIN (INFO)");
-    log::warn!("ANDROID_MAIN (WARN)");
-    log::error!("ANDROID_MAIN (ERROR)");
 
     let mut state = State {
         combining_accent: None,
         window: None,
         quit: false,
-        redraw: true,
         running: false,
-        app: App::default(),
+        app: App::new(),
         android: android.clone(),
         input: InputState::default(),
         translater: TouchTranslater::default(),
         text_input: None,
     };
-    state.app.init();
+    let mut last_frame_time = SystemTime::now();
     let timeout = Duration::from_millis(1000 / 60);
-    let mut perf = Perf::default();
 
     while !state.quit {
         android.poll_events(Some(timeout), |event| {
             match event {
                 PollEvent::Wake => {}
-                PollEvent::Timeout => state.redraw = true,
+                PollEvent::Timeout => {}
                 PollEvent::Main(main_event) => {
-                    on_main_event(main_event, &mut state);
+                    handle_main_event(main_event, &mut state);
                 }
                 _ => {}
             }
 
-            // TODO: FIX FPS BEING CAPPED AT 20
-            if frame_timer.ready() && state.running {
-                frame_timer.reset();
-                state.redraw = false;
-
-                let mut debug_perf = false;
-                on_frame(&mut state, &mut perf, &mut debug_perf);
-                perf.end_frame();
-
-                if debug_perf {
-                    log::info!("FRAME AVERGAES: {:#?}", perf.averages());
-                }
+            let redraw = SystemTime::now()
+                .duration_since(last_frame_time)
+                .unwrap_or(Duration::ZERO)
+                .as_millis()
+                > (1000 / 60);
+            if redraw && state.running {
+                last_frame_time = SystemTime::now();
+                draw_frame(&mut state);
             }
         });
     }
 }
 
-fn on_main_event(event: MainEvent, state: &mut State) {
+fn handle_main_event(event: MainEvent, state: &mut State) {
     match event {
         MainEvent::SaveState { .. } => {}
         MainEvent::Pause => {
@@ -263,7 +220,6 @@ fn on_main_event(event: MainEvent, state: &mut State) {
         MainEvent::InitWindow { .. } => {
             log::info!("Window initialized - creating display & GPU handles...");
             state.window = state.android.native_window().map(Window::new);
-            state.redraw = true;
 
             if let Some(win) = &state.window {
                 pollster::block_on(state.app.resume(win, win.size()));
@@ -276,7 +232,6 @@ fn on_main_event(event: MainEvent, state: &mut State) {
             state.window = None;
         }
         MainEvent::WindowResized { .. } => {
-            state.redraw = true;
             if let Some(win) = &state.window {
                 log::info!("Resizing app to {:?}", win.size());
                 state.app.update_size(win.size());
@@ -284,12 +239,8 @@ fn on_main_event(event: MainEvent, state: &mut State) {
                 log::error!("Handling WindowResized but window is None");
             }
         }
-        MainEvent::RedrawNeeded { .. } => {
-            state.redraw = true;
-        }
-        MainEvent::InputAvailable { .. } => {
-            state.redraw = true;
-        }
+        MainEvent::RedrawNeeded { .. } => {}
+        MainEvent::InputAvailable { .. } => {}
         MainEvent::ConfigChanged { .. } => {}
         MainEvent::LowMemory => log::warn!("Recieved LowMemory Event..."),
         MainEvent::Destroy => {
@@ -300,34 +251,36 @@ fn on_main_event(event: MainEvent, state: &mut State) {
     }
 }
 
-fn on_input_event(
-    input: &mut InputState,
-    translater: &mut TouchTranslater,
-    event: &InputEvent,
-    android: &AndroidApp,
-    combining_accent: &mut Option<char>,
-    text_input: &mut Option<TextInputState>,
-) -> InputStatus {
+fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
+    let out = &mut state.input;
     match event {
         InputEvent::KeyEvent(key_event) => {
-            let combined_key_char =
-                character_map_and_combine_key(android, key_event, combining_accent);
+            let combined_key_char = character_map_and_combine_key(
+                &state.android,
+                key_event,
+                &mut state.combining_accent,
+            );
             match combined_key_char {
                 Some(KeyMapChar::Unicode(ch)) | Some(KeyMapChar::CombiningAccent(ch)) => {
-                    input.on_event(LogisimInputEvent::Type(ch));
+                    out.on_event(LogisimInputEvent::Type(ch));
                 }
                 _ => {}
             }
         }
         InputEvent::MotionEvent(motion_event) => {
             let id = motion_event.device_id();
-            let pointer = motion_event.pointer_at_index(motion_event.pointer_index());
+            let pointer_idx = motion_event.pointer_index();
+            let pointer = motion_event.pointer_at_index(pointer_idx);
             let pos = vec2(pointer.x(), pointer.y());
-            let handler = |e: LogisimInputEvent| input.on_event(e);
+            let handler = |e: LogisimInputEvent| out.on_event(e);
+            let translater = &mut state.translater;
 
             match motion_event.action() {
-                MotionAction::Down => translater.phase_start(id, pos, handler),
-                MotionAction::Up => translater.phase_end(id, pos, handler),
+                MotionAction::Down | MotionAction::PointerDown => {
+                    log::info!("Pressed pointer; idx: {pointer_idx}");
+                    translater.phase_start(id, pos, handler)
+                }
+                MotionAction::Up | MotionAction::Cancel => translater.phase_end(id, pos, handler),
                 MotionAction::Move => translater.phase_move(id, pos, handler),
                 a => log::warn!("Unknown motion action: {a:?}"),
             }
@@ -350,7 +303,7 @@ fn on_input_event(
                 compose,
             };
             // Temporary fix for backspace deleting 2 characters on android keyboard.
-            if let Some(input) = text_input {
+            if let Some(input) = &state.text_input {
                 if input.text.len().saturating_sub(info.text.len()) == 2 {
                     info.text.push(input.text.chars().rev().nth(1).unwrap());
                     info.selection.end += 1;
@@ -359,61 +312,52 @@ fn on_input_event(
                     }
                 }
 
-                android.set_text_input_state(android_activity::input::TextInputState {
-                    text: info.text.clone(),
-                    selection: android_activity::input::TextSpan {
-                        start: info.selection.start as usize,
-                        end: info.selection.end as usize,
-                    },
-                    compose_region: info.compose.as_ref().map(|range| {
-                        android_activity::input::TextSpan {
-                            start: range.start as usize,
-                            end: range.end as usize,
-                        }
-                    }),
-                });
+                state
+                    .android
+                    .set_text_input_state(android_activity::input::TextInputState {
+                        text: info.text.clone(),
+                        selection: android_activity::input::TextSpan {
+                            start: info.selection.start as usize,
+                            end: info.selection.end as usize,
+                        },
+                        compose_region: info.compose.as_ref().map(|range| {
+                            android_activity::input::TextSpan {
+                                start: range.start as usize,
+                                end: range.end as usize,
+                            }
+                        }),
+                    });
             }
             log::info!("Android set TextInput to {info:?}");
-            input.set_text_input(Some(info.clone()));
-            *text_input = Some(info);
+            out.set_text_input(Some(info.clone()));
+            state.text_input = Some(info);
         }
-        _ => {}
+        _ => return InputStatus::Unhandled,
     }
-    InputStatus::Unhandled
+    InputStatus::Handled
 }
 
-fn on_frame(state: &mut State, perf: &mut Perf, debug_perf: &mut bool) {
-    state.translater.update(|e| state.input.on_event(e));
-    let (input, translater) = (&mut state.input, &mut state.translater);
-    perf.start("input handling");
-    match state.android.input_events_iter() {
-        Ok(mut iter) => loop {
-            if !iter.next(|event| {
-                on_input_event(
-                    input,
-                    translater,
-                    event,
-                    &state.android,
-                    &mut state.combining_accent,
-                    &mut state.text_input,
-                )
-            }) {
-                break;
+fn draw_frame(state: &mut State) {
+    // Handle input
+    'i: {
+        state.translater.update(|e| state.input.on_event(e));
+        let android = state.android.clone();
+        let mut iter = match android.input_events_iter() {
+            Ok(iter) => iter,
+            Err(err) => {
+                log::warn!("Failed to get input events iterator: {err:?}");
+                break 'i;
             }
-        },
-        Err(err) => {
-            log::warn!("Failed to get input events iterator: {err:?}");
-        }
+        };
+        while iter.next(|event| handle_input_event(state, event)) {}
     }
-    perf.end();
 
     let Some(_win) = &state.window else {
         log::warn!("Failed to draw frame: window is None");
         return;
     };
 
-    perf.start("content_rect access");
-    let mut text_input = None;
+    // Determine screen area
     let content_rect = state.android.content_rect();
     let mut content_rect = logisim_common::graphics::Rect::from_min_max(
         logisim_common::glam::vec2(content_rect.left as f32, content_rect.top as f32),
@@ -427,18 +371,21 @@ fn on_frame(state: &mut State, perf: &mut Perf, debug_perf: &mut bool) {
         RIGHT_DISPLAY_INSET.load(Ordering::Relaxed) as f32,
         BOTTOM_DISPLAY_INSET.load(Ordering::Relaxed) as f32,
     );
-    perf.end();
 
-    if let Err(err) = state
+    // Draw frame
+    let mut text_input = None;
+    match state
         .app
-        .draw_frame(&mut state.input, content_rect, &mut text_input, perf)
+        .draw_frame(&mut state.input, content_rect, &mut text_input)
     {
-        log::warn!("Failed to draw frame: {err:?}");
-        perf.end();
-        return;
+        Err(err) => {
+            log::warn!("Failed to draw frame: {err:?}");
+            return;
+        }
+        Ok(_) => {}
     }
 
-    perf.start("misc");
+    // Handle text input
     state.input.update();
     if state.text_input.is_none() && text_input.is_some() {
         log::info!("App started wanting text input ;' opening keyboard");
@@ -468,7 +415,6 @@ fn on_frame(state: &mut State, perf: &mut Perf, debug_perf: &mut bool) {
                 }),
             });
     }
-    perf.end();
     state.text_input = text_input;
 }
 

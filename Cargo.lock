@@ -1012,6 +1012,7 @@ name = "logisim-desktop"
 version = "0.1.0"
 dependencies = [
  "env_logger 0.10.1",
+ "log",
  "logisim-common",
  "pollster 0.3.0",
  "winit",

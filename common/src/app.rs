@@ -7,6 +7,7 @@ use crate::Id;
 
 use glam::{UVec2, Vec2};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
+use std::time::SystemTime;
 use wgpu::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -85,6 +86,7 @@ pub struct UiState {
     chip_ty: ChipTy,
     chip_name: TextField,
     open_menu: Option<Menu>,
+    fps: u32,
 }
 impl Default for UiState {
     fn default() -> Self {
@@ -95,6 +97,7 @@ impl Default for UiState {
             chip_ty: ChipTy::Sequential,
             chip_name: TextField::default(),
             open_menu: None,
+            fps: 0,
         }
     }
 }
@@ -145,7 +148,6 @@ pub struct OptionsMenu {
     info: Rect,
     ui_size: Rect,
     ui_theme: Rect,
-    debug_perf: Rect,
     frame_count: Rect,
     glyph_cache_count: Rect,
     done: Rect,
@@ -167,20 +169,13 @@ impl OptionsMenu {
             rs.info = placer.next();
             rs.ui_size = placer.next();
             rs.ui_theme = placer.next();
-            rs.debug_perf = placer.next();
             rs.frame_count = placer.next();
             rs.glyph_cache_count = placer.next();
             rs.done = placer.next();
         }
         rs
     }
-    fn show(
-        &self,
-        painter: &mut Painter,
-        state: &mut UiState,
-        rebuild: &mut bool,
-        perf: &crate::Perf,
-    ) {
+    fn show(&self, painter: &mut Painter, state: &mut UiState, rebuild: &mut bool) {
         painter.menu_background(self.background);
         painter.text(self.title, "Options");
         painter.seperator(self.title_sep);
@@ -189,9 +184,6 @@ impl OptionsMenu {
         }
         painter.cycle(self.ui_size, &mut state.ui_size, rebuild);
         painter.cycle(self.ui_theme, &mut state.ui_theme, &mut false);
-        if painter.button(self.debug_perf, "Debug Perf").triggered {
-            log::info!("FRAME AVERAGES: {:#?}", perf.averages());
-        }
         painter.text(self.frame_count, format!("frames: {}", state.frame_count));
         painter.text(
             self.glyph_cache_count,
@@ -208,6 +200,7 @@ pub struct OverlayUi {
     background: Rect,
     options: Rect,
     save: Rect,
+    fps: Rect,
 }
 impl OverlayUi {
     fn new(style: &Style, view_bounds: Rect) -> Self {
@@ -221,6 +214,7 @@ impl OverlayUi {
         Self {
             options: placer.image_button(),
             save: placer.image_button(),
+            fps: placer.next(),
             background: placer.bounds,
         }
     }
@@ -236,6 +230,7 @@ impl OverlayUi {
         if painter.image_button(self.save, &TexCoords::SAVE).triggered {
             state.open_menu = Some(Menu::Save);
         }
+        painter.text(self.fps, format!("fps: {}", state.fps));
     }
 }
 
@@ -456,34 +451,14 @@ pub struct App {
     pub ui_state: UiState,
     pub place_chips_pos: Vec2,
     pub font: Font<'static>,
+    pub last_fps_update: Option<SystemTime>,
+    pub frame_count: u32,
     pub painter_model: Model,
     pub layouts_dirty: bool,
 }
 impl App {
-    pub fn pause(&mut self) {
-        self.renderer = None;
-        self.gpu = None;
-    }
-
-    pub async fn resume<W: HasRawWindowHandle + HasRawDisplayHandle>(
-        &mut self,
-        window: &W,
-        win_size: UVec2,
-    ) {
-        let gpu = Gpu::new(&self.instance, &window, win_size).await.unwrap();
-        gpu.configure_surface();
-
-        let mut renderer = Renderer::new(&gpu);
-        renderer.update_size(&gpu, win_size.as_vec2());
-        renderer.update_global_transform(&gpu, Default::default());
-        self.layouts_dirty = true;
-        self.place_chips_pos = win_size.as_vec2() * 0.5;
-
-        self.gpu = Some(gpu);
-        self.renderer = Some(renderer);
-    }
-
-    pub fn init(&mut self) {
+    pub fn new() -> Self {
+        let mut app = Self::default();
         let nand_table = sim::TruthTable {
             num_inputs: 2,
             num_outputs: 1,
@@ -496,7 +471,7 @@ impl App {
             name: "Not".into(),
             map: Box::new([1, 0]),
         };
-        self.sim.tables = vec![nand_table, not_table];
+        app.sim.tables = vec![nand_table, not_table];
         let nand = save::ChipSave {
             region_size: 3,
             name: "Nand".into(),
@@ -532,7 +507,32 @@ impl App {
             )],
             inner_nodes: vec![],
         };
-        self.chip_saves.extend([nand, not]);
+        app.chip_saves.extend([nand, not]);
+        app.last_fps_update = Some(SystemTime::now());
+        app
+    }
+
+    pub fn pause(&mut self) {
+        self.renderer = None;
+        self.gpu = None;
+    }
+
+    pub async fn resume<W: HasRawWindowHandle + HasRawDisplayHandle>(
+        &mut self,
+        window: &W,
+        win_size: UVec2,
+    ) {
+        let gpu = Gpu::new(&self.instance, &window, win_size).await.unwrap();
+        gpu.configure_surface();
+
+        let mut renderer = Renderer::new(&gpu);
+        renderer.update_size(&gpu, win_size.as_vec2());
+        renderer.update_global_transform(&gpu, Default::default());
+        self.layouts_dirty = true;
+        self.place_chips_pos = win_size.as_vec2() * 0.5;
+
+        self.gpu = Some(gpu);
+        self.renderer = Some(renderer);
     }
 
     pub fn size(&self) -> UVec2 {
@@ -560,13 +560,31 @@ impl App {
         input: &mut InputState,
         content_rect: Rect,
         text_input: &mut Option<TextInputState>,
-        perf: &mut crate::Perf,
     ) -> Result<(), String> {
         let gpu = self.gpu.as_ref().ok_or(format!("Missing Gpu instance"))?;
         let renderer = self
             .renderer
             .as_mut()
             .ok_or(format!("Missing Renderer instance"))?;
+
+        // Update FPS counter:
+        'f: {
+            let Some(last_update) = &mut self.last_fps_update else {
+                break 'f;
+            };
+
+            self.frame_count += 1;
+            if SystemTime::now()
+                .duration_since(*last_update)
+                .unwrap()
+                .as_secs()
+                >= 1
+            {
+                *last_update = SystemTime::now();
+                self.ui_state.fps = self.frame_count;
+                self.frame_count = 0;
+            }
+        }
 
         let style = self.ui_state.create_style();
         if self.layouts_dirty {
@@ -682,14 +700,11 @@ impl App {
         }
 
         // ---- Draw UI & Menus ----
-        perf.start("draw UI");
         match self.ui_state.open_menu {
-            Some(Menu::Options) => self.options_menu.show(
-                &mut painter,
-                &mut self.ui_state,
-                &mut self.layouts_dirty,
-                perf,
-            ),
+            Some(Menu::Options) => {
+                self.options_menu
+                    .show(&mut painter, &mut self.ui_state, &mut self.layouts_dirty)
+            }
             Some(Menu::Info) => self.info_menu.show(&mut painter, &mut self.ui_state),
             Some(Menu::Save) => self.save_menu.show(&mut painter, &mut self.ui_state),
             None => {
@@ -709,20 +724,15 @@ impl App {
                 }
             }
         };
-        perf.end();
 
         // ---- Finish Drawing ----
-        perf.start("Upload model");
         let model = painter.upload(gpu);
-        perf.end();
         *text_input = painter.text_input.clone();
 
         let models = std::iter::once(&model);
-        perf.start("render");
         let rs = renderer
             .render(gpu, Some(style.background), models)
             .map_err(|_| format!("Failed to render models"));
-        perf.end();
         rs
     }
 }

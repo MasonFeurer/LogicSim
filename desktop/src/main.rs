@@ -2,7 +2,6 @@ use logisim_common as logisim;
 
 use logisim::glam::vec2;
 use logisim::input::{InputEvent, InputState, PtrButton};
-use logisim::Perf;
 use logisim::{app::App, Rect};
 
 use std::time::{Duration, SystemTime};
@@ -21,13 +20,11 @@ fn main() {
         .unwrap();
 
     let mut state = State {
-        app: App::default(),
+        app: App::new(),
         input: InputState::default(),
         window,
-        frame_timer: Timer::new(60),
-        perf: Perf::default(),
+        last_frame_time: SystemTime::now(),
     };
-    state.app.init();
 
     _ = event_loop.run(move |event, event_loop| {
         let mut exit = false;
@@ -38,42 +35,11 @@ fn main() {
     });
 }
 
-#[derive(Clone, Debug)]
-struct Timer {
-    per_second: u32,
-    last_reset: SystemTime,
-}
-impl Timer {
-    fn new(per_second: u32) -> Self {
-        Self {
-            per_second,
-            last_reset: SystemTime::now(),
-        }
-    }
-
-    fn until_ready(&self) -> Duration {
-        let ready_time = self.last_reset + Duration::from_millis(1000 / self.per_second as u64);
-        // ready_time might not be in the future
-        ready_time
-            .duration_since(SystemTime::now())
-            .unwrap_or(Duration::ZERO)
-    }
-
-    fn ready(&self) -> bool {
-        self.until_ready().as_millis() == 0
-    }
-
-    fn reset(&mut self) {
-        self.last_reset = SystemTime::now();
-    }
-}
-
 struct State {
     app: App,
     window: Window,
-    frame_timer: Timer,
     input: InputState,
-    perf: Perf,
+    last_frame_time: SystemTime,
 }
 
 fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
@@ -98,15 +64,22 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 ctx.window.inner_size().height as f32,
             );
             let content_rect = Rect::from_min_size(vec2(0.0, 0.0), content_size);
-            if ctx.frame_timer.ready() {
-                ctx.frame_timer.reset();
-                _ = ctx.app.draw_frame(
-                    &mut ctx.input,
-                    content_rect,
-                    &mut Default::default(),
-                    &mut ctx.perf,
-                );
-                ctx.perf.end_frame();
+
+            let redraw = SystemTime::now()
+                .duration_since(ctx.last_frame_time)
+                .unwrap_or(Duration::ZERO)
+                .as_millis()
+                > (1000 / 60);
+
+            if redraw {
+                ctx.last_frame_time = SystemTime::now();
+                match ctx
+                    .app
+                    .draw_frame(&mut ctx.input, content_rect, &mut Default::default())
+                {
+                    Err(err) => log::warn!("Failed to draw frame: {err:?}"),
+                    Ok(_) => {}
+                }
                 ctx.input.update();
             }
             ctx.window.request_redraw();
