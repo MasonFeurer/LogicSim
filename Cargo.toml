@@ -1,0 +1,3 @@
+[workspace]
+members = ["common", "desktop", "android"]
+resolver = "2"

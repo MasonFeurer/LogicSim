@@ -1,0 +1,14 @@
+[package]
+name = "logisim-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+glam = "0.24.2"
+wgpu = "0.17.1"
+raw-window-handle = "0.5"
+image = { version = "0.24", features = ["png"] }
+rusttype = "0.9.3"
+cdt = "0.1.0"
+log = "0.4"
+fastrand = "2.0.1"
