@@ -687,10 +687,8 @@ impl App {
         if let Some(new_offset) = painter.input.get_drag(Id::new("background")) {
             self.scene.transform.offset = new_offset;
         }
-        if painter.input.zoom_delta() != 0.0 {
-            self.scene
-                .transform
-                .zoom(painter.input.ptr_pos(), painter.input.zoom_delta() * 0.2);
+        if let Some((anchor, delta)) = painter.input.zoom_delta() {
+            self.scene.transform.zoom(anchor, delta * 0.1);
         }
 
         // ---- Draw UI & Menus ----

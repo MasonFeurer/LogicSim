@@ -126,7 +126,10 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 .on_event(InputEvent::Scroll(vec2(pos.x as f32, pos.y as f32))),
         },
         WindowEvent::TouchpadMagnify { delta, .. } => {
-            ctx.input.on_event(InputEvent::Zoom(delta as f32))
+            if !ctx.input.ptr_gone() {
+                ctx.input
+                    .on_event(InputEvent::Zoom(ctx.input.ptr_pos(), delta as f32))
+            }
         }
         WindowEvent::KeyboardInput { event, .. } => {
             if matches!(event.state, ElementState::Pressed) {

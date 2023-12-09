@@ -283,6 +283,9 @@ impl Default for PanZoomTransform {
 }
 impl PanZoomTransform {
     pub fn zoom(&mut self, pos: Vec2, delta: f32) {
+        if delta == 0.0 {
+            return;
+        }
         let xs = (pos.x - self.offset.x) / self.scale;
         let ys = (pos.y - self.offset.y) / self.scale;
         self.scale = (self.scale + delta).clamp(self.min_scale, self.max_scale);

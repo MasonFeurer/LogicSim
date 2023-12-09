@@ -457,6 +457,12 @@ pub fn text_edit<T: AsRef<str>>(
             if field.text.pop().is_some() {
                 field.cursor -= 1;
             }
+        } else if painter.input.key_pressed(Key::Space) {
+            field.text.push(' ');
+            field.cursor += 1;
+        } else if painter.input.key_pressed(Key::Tab) {
+            field.text.push('\t');
+            field.cursor += 1;
         } else if let Some(ch) = painter.input.char_press() {
             field.text.push(ch);
             field.cursor += 1;
@@ -476,29 +482,29 @@ pub fn text_edit<T: AsRef<str>>(
             .rect_outline(shape, 2.0, painter.style.text_color);
 
         // CURSOR:
-        let sc = shape.height();
-        let char_idx = if field.cursor == 0 {
-            0
-        } else {
-            field
-                .text
-                .char_indices()
-                .nth(field.cursor as usize - 1)
-                .unwrap_or((0, '\0'))
-                .0
-        };
-        let text_before_cursor = if field.cursor == 0 {
-            ""
-        } else {
-            &field.text[0..char_idx]
-        };
-        let offset = painter.text_size(text_before_cursor, sc).x;
-        let min = shape.min + vec2(offset, sc * 0.05);
-        let size = vec2(sc * 0.1, sc * 0.9);
+        // let sc = shape.height();
+        // let char_idx = if field.cursor == 0 {
+        //     0
+        // } else {
+        //     field
+        //         .text
+        //         .char_indices()
+        //         .nth(field.cursor as usize - 1)
+        //         .unwrap_or((0, '\0'))
+        //         .0
+        // };
+        // let text_before_cursor = if field.cursor == 0 {
+        //     ""
+        // } else {
+        //     &field.text[0..char_idx]
+        // };
+        // let offset = painter.text_size(text_before_cursor, sc).x;
+        // let min = shape.min + vec2(offset, sc * 0.05);
+        // let size = vec2(sc * 0.1, sc * 0.9);
 
-        let color = painter.style.text_color;
-        let rect = Rect::from_min_size(min, size);
-        painter.model.rect(rect, &MAIN_ATLAS.white, color);
+        // let color = painter.style.text_color;
+        // let rect = Rect::from_min_size(min, size);
+        // painter.model.rect(rect, &MAIN_ATLAS.white, color);
     }
 
     let text_color = match field.text.is_empty() {

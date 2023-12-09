@@ -2,6 +2,7 @@ use logisim_common as logisim;
 
 use logisim::app::App;
 use logisim::glam::{uvec2, vec2, UVec2, Vec2};
+use logisim::graphics::Rect;
 use logisim::input::{InputEvent as LogisimInputEvent, InputState, PtrButton, TextInputState};
 
 use android_activity::{
@@ -70,24 +71,40 @@ unsafe impl HasRawDisplayHandle for Window {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+struct Ptr {
+    pos: Vec2,
+}
+
+#[derive(Debug)]
+struct Zoom {
+    start_dist: f32,
+    prev_dist: f32,
+    anchor: Vec2,
+}
+
 #[derive(Debug)]
 struct TouchTranslater {
-    device_id: Option<i32>,
     ignore_release: bool,
     last_press_time: SystemTime,
     last_pos: Vec2,
     press_pos: Option<Vec2>,
     holding: bool,
+    pointer_count: u32,
+    pointers: Vec<Option<Ptr>>,
+    zoom: Option<Zoom>,
 }
 impl Default for TouchTranslater {
     fn default() -> Self {
         Self {
-            device_id: None,
             ignore_release: false,
             last_press_time: SystemTime::UNIX_EPOCH,
             last_pos: Vec2::ZERO,
             press_pos: None,
             holding: false,
+            pointer_count: 0,
+            pointers: vec![],
+            zoom: None,
         }
     }
 }
@@ -106,22 +123,47 @@ impl TouchTranslater {
         }
     }
 
-    fn phase_start(&mut self, id: i32, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
-        log::info!("Started motion: {id}");
-        self.device_id = Some(id);
-        out(LogisimInputEvent::Hover(pos));
-        out(LogisimInputEvent::Press(pos, PtrButton::LEFT));
+    fn phase_start(&mut self, idx: usize, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
+        log::info!("Started motion: {idx} {pos:?}");
 
-        self.last_pos = pos;
-        self.last_press_time = SystemTime::now();
-        self.press_pos = Some(pos);
-        self.holding = true;
-        self.ignore_release = false;
+        self.pointer_count += 1;
+        self.pointers.resize(idx + 1, None);
+        self.pointers[idx] = Some(Ptr { pos });
+
+        if self.pointer_count == 2 {
+            self.press_pos = None;
+            self.ignore_release = true;
+            self.holding = false;
+
+            out(LogisimInputEvent::PointerLeft);
+            out(LogisimInputEvent::Release(PtrButton::LEFT));
+
+            let mut pointers = self.pointers.iter().cloned().filter_map(|ptr| ptr);
+            let [a, b] = [pointers.next().unwrap(), pointers.next().unwrap()];
+            let dist = a.pos.distance_squared(b.pos);
+            let anchor = Rect::from_min_max(a.pos.min(b.pos), a.pos.max(b.pos)).center();
+            self.zoom = Some(Zoom {
+                start_dist: dist,
+                prev_dist: dist,
+                anchor,
+            });
+        } else {
+            out(LogisimInputEvent::Hover(pos));
+            out(LogisimInputEvent::Press(pos, PtrButton::LEFT));
+
+            self.last_pos = pos;
+            self.last_press_time = SystemTime::now();
+            self.press_pos = Some(pos);
+            self.holding = true;
+            self.ignore_release = false;
+        }
     }
 
-    fn phase_move(&mut self, _id: i32, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
+    fn phase_move(&mut self, idx: usize, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
         self.last_pos = pos;
-        out(LogisimInputEvent::Hover(pos));
+        if self.pointer_count == 1 {
+            out(LogisimInputEvent::Hover(pos));
+        }
 
         if let Some(press_pos) = self.press_pos {
             let press_dist = press_pos.distance_squared(pos).abs();
@@ -130,10 +172,25 @@ impl TouchTranslater {
                 self.press_pos = None;
             }
         }
+        if let Some(ptr) = self.pointers.get_mut(idx).unwrap() {
+            ptr.pos = pos;
+        }
+        if self.pointer_count == 2 {
+            let mut pointers = self.pointers.iter().cloned().filter_map(|ptr| ptr);
+            let [a, b] = [pointers.next().unwrap(), pointers.next().unwrap()];
+            let dist = a.pos.distance_squared(b.pos);
+            let zoom = self.zoom.as_ref().unwrap();
+            if dist != zoom.start_dist {
+                let delta = (dist - zoom.prev_dist) * 0.0003;
+                out(LogisimInputEvent::Zoom(zoom.anchor, delta));
+            }
+
+            self.zoom.as_mut().unwrap().prev_dist = dist;
+        }
     }
 
-    fn phase_end(&mut self, _id: i32, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
-        out(LogisimInputEvent::Release(pos, PtrButton::LEFT));
+    fn phase_end(&mut self, idx: usize, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
+        out(LogisimInputEvent::Release(PtrButton::LEFT));
 
         // If we've been holding the pointer still and have not
         // triggered a right click, we should send a left click
@@ -143,6 +200,13 @@ impl TouchTranslater {
         self.press_pos = None;
         self.holding = false;
         out(LogisimInputEvent::PointerLeft);
+
+        if self.pointer_count == 2 {
+            self.zoom = None;
+        }
+
+        self.pointers[idx] = None;
+        self.pointer_count -= 1;
     }
 }
 
@@ -268,20 +332,21 @@ fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
             }
         }
         InputEvent::MotionEvent(motion_event) => {
-            let id = motion_event.device_id();
-            let pointer_idx = motion_event.pointer_index();
-            let pointer = motion_event.pointer_at_index(pointer_idx);
+            let idx = motion_event.pointer_index();
+            let pointer = motion_event.pointer_at_index(idx);
             let pos = vec2(pointer.x(), pointer.y());
             let handler = |e: LogisimInputEvent| out.on_event(e);
             let translater = &mut state.translater;
 
             match motion_event.action() {
                 MotionAction::Down | MotionAction::PointerDown => {
-                    log::info!("Pressed pointer; idx: {pointer_idx}");
-                    translater.phase_start(id, pos, handler)
+                    log::info!("Pressed pointer; idx: {idx}");
+                    translater.phase_start(idx, pos, handler)
                 }
-                MotionAction::Up | MotionAction::Cancel => translater.phase_end(id, pos, handler),
-                MotionAction::Move => translater.phase_move(id, pos, handler),
+                MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
+                    translater.phase_end(idx, pos, handler)
+                }
+                MotionAction::Move => translater.phase_move(idx, pos, handler),
                 a => log::warn!("Unknown motion action: {a:?}"),
             }
         }

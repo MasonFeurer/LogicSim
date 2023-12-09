@@ -66,7 +66,7 @@ pub struct InputState {
     down_ptr_buttons: [bool; 5],
     text_input: Option<TextInputState>,
     scroll: Vec2,
-    zoom: f32,
+    zoom: Option<(Vec2, f32)>,
 }
 impl InputState {
     pub fn update_drag(&mut self, id: Id, bounds: Rect, anchor: Vec2, button: PtrButton) {
@@ -117,7 +117,7 @@ impl InputState {
         self.scroll
     }
     #[inline(always)]
-    pub fn zoom_delta(&self) -> f32 {
+    pub fn zoom_delta(&self) -> Option<(Vec2, f32)> {
         self.zoom
     }
 
@@ -221,11 +221,23 @@ impl InputState {
         self.key_press = None;
         self.char_press = None;
         self.pasted_text.clear();
-        self.zoom = 0.0;
+        self.zoom = None;
         self.scroll = Vec2::ZERO;
     }
 
+    fn add_zoom(&mut self, anchor: Vec2, delta: f32) {
+        if let Some(zoom) = &mut self.zoom {
+            if zoom.0 != anchor {
+                log::warn!("Zoom anchor moved mid-frame ; not accounted for");
+            }
+            zoom.1 += delta;
+        } else {
+            self.zoom = Some((anchor, delta));
+        }
+    }
+
     pub fn on_event(&mut self, event: InputEvent) {
+        // log::info!("Received event: {event:?}");
         match event {
             InputEvent::Paste(text) => self.pasted_text += &text,
             InputEvent::Click(pos, button) => self.ptr_click = Some((button, pos)),
@@ -233,7 +245,7 @@ impl InputState {
                 self.down_ptr_buttons[usize::from(button)] = true;
                 self.ptr_press = Some((button, pos));
             }
-            InputEvent::Release(_, button) => {
+            InputEvent::Release(button) => {
                 if self.drag.as_ref().map(|drag| drag.button) == Some(button) {
                     self.drag = None;
                 }
@@ -252,7 +264,9 @@ impl InputState {
             InputEvent::Scroll(delta) => {
                 if delta.x == 0.0 {
                     if self.modifiers.cmd {
-                        self.zoom += delta.y;
+                        if let Some(pos) = self.ptr_pos {
+                            self.add_zoom(pos, delta.y);
+                        }
                     } else if self.modifiers.shift {
                         self.scroll.x += delta.y;
                     } else {
@@ -261,7 +275,7 @@ impl InputState {
                 }
                 self.scroll += delta;
             }
-            InputEvent::Zoom(delta) => self.zoom += delta,
+            InputEvent::Zoom(anchor, delta) => self.add_zoom(anchor, delta),
         }
     }
 }
@@ -293,7 +307,7 @@ impl From<PtrButton> for usize {
 #[derive(Debug)]
 pub enum InputEvent {
     Press(Vec2, PtrButton),
-    Release(Vec2, PtrButton),
+    Release(PtrButton),
     Click(Vec2, PtrButton),
     Hover(Vec2),
     PressKey(Key),
@@ -301,7 +315,7 @@ pub enum InputEvent {
     Type(char),
     PointerLeft,
     Scroll(Vec2),
-    Zoom(f32),
+    Zoom(Vec2, f32),
     Paste(String),
 }
 
