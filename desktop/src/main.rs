@@ -116,7 +116,7 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 ctx.input.on_event(InputEvent::Click(pos, button));
                 ctx.input.on_event(InputEvent::Press(pos, button));
             } else {
-                ctx.input.on_event(InputEvent::Release(pos, button));
+                ctx.input.on_event(InputEvent::Release(button));
             }
         }
         WindowEvent::MouseWheel { delta, .. } => match delta {
