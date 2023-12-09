@@ -60,7 +60,7 @@ pub struct Locals {
     pub screen_size: [f32; 2],
     pub global_offset: [f32; 2],
     pub global_scale: f32,
-    _padding0: u32,
+    pub texture_size: u32,
 }
 
 pub struct Renderer {
@@ -205,6 +205,11 @@ impl Renderer {
 
     pub fn update_size(&mut self, gpu: &Gpu, size: Vec2) {
         self.locals.screen_size = size.into();
+        self.locals_buf.write(&gpu.queue, &self.locals);
+    }
+
+    pub fn update_atlas_size(&mut self, gpu: &Gpu, size: u32) {
+        self.locals.texture_size = size;
         self.locals_buf.write(&gpu.queue, &self.locals);
     }
 

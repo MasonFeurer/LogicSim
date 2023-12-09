@@ -1,14 +1,12 @@
-use super::{Color, ColorSrc, Font, GpuModel, Model, Rect, TexCoords, Transform};
+use super::{Color, ColorSrc, GpuModel, Image, Model, Rect, Transform, MAIN_ATLAS};
 use crate::gpu::Gpu;
 use crate::input::{InputState, Key, PtrButton, TextInputState};
 use glam::{vec2, Vec2};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Style {
     pub text_size: f32,
     pub text_color: ColorSrc,
-    pub font: Arc<Font<'static>>,
     pub background: Color,
     pub menu_background: ColorSrc,
     pub item_size: Vec2,
@@ -26,7 +24,6 @@ impl Default for Style {
         Self {
             text_size: 30.0,
             text_color: Color::shade(255).into(),
-            font: Arc::new(Font::default()),
             background: Color::shade(4),
             menu_background: Color::shade(10).into(),
             item_size: vec2(200.0, 35.0),
@@ -146,28 +143,21 @@ pub struct Interaction {
     pub hovered: bool,
 }
 
-pub struct Painter<'a, 'b, 'f> {
+pub struct Painter<'a, 'b> {
     pub transform: Transform,
     pub style: &'a Style,
     pub input: &'a mut InputState,
-    pub font: &'f mut Font<'static>,
     pub text_input: Option<TextInputState>,
     pub model: &'b mut Model,
     pub debug: bool,
 }
-impl<'a, 'b, 'f> Painter<'a, 'b, 'f> {
-    pub fn new(
-        style: &'a Style,
-        input: &'a mut InputState,
-        model: &'b mut Model,
-        font: &'f mut Font<'static>,
-    ) -> Self {
+impl<'a, 'b> Painter<'a, 'b> {
+    pub fn new(style: &'a Style, input: &'a mut InputState, model: &'b mut Model) -> Self {
         Self {
             transform: Transform::default(),
             style,
             input,
             debug: false,
-            font,
             text_input: None,
             model,
         }
@@ -208,14 +198,14 @@ impl<'a, 'b, 'f> Painter<'a, 'b, 'f> {
 
     pub fn menu_background(&mut self, shape: Rect) {
         let color = self.style.menu_background;
-        self.model.rect(shape, &TexCoords::WHITE, color);
+        self.model.rect(shape, &MAIN_ATLAS.white, color);
     }
 
     pub fn button<T: AsRef<str>>(&mut self, shape: Rect, label: T) -> ButtonRs {
         self.debug_shape(shape);
         button(shape, label, self)
     }
-    pub fn image_button(&mut self, shape: Rect, tex: &TexCoords) -> ButtonRs {
+    pub fn image_button(&mut self, shape: Rect, tex: &Image) -> ButtonRs {
         self.debug_shape(shape);
         image_button(shape, tex, self)
     }
@@ -228,15 +218,20 @@ impl<'a, 'b, 'f> Painter<'a, 'b, 'f> {
         cycle(shape, state, self, changed)
     }
 
-    pub fn custom_text<T: AsRef<str>>(
+    #[inline(always)]
+    pub fn text_size(&self, text: impl AsRef<str>, scale: f32) -> Vec2 {
+        super::text::text_size(text.as_ref(), scale as u32)
+    }
+
+    pub fn custom_text(
         &mut self,
         shape: Rect,
-        text: T,
+        text: impl AsRef<str>,
         color: ColorSrc,
         align: Align2,
     ) {
         let scale = shape.height();
-        let size2 = self.font.text_size(text.as_ref(), scale);
+        let size2 = self.text_size(&text, scale);
         let min_x = match align.x {
             Align::Min => shape.min.x,
             Align::Center => shape.min.x + shape.width() * 0.5 - size2.x * 0.5,
@@ -247,14 +242,12 @@ impl<'a, 'b, 'f> Painter<'a, 'b, 'f> {
             Align::Center => shape.min.y + shape.height() * 0.5 - size2.y * 0.5,
             Align::Max => shape.max.y - size2.y,
         };
-
-        self.font.build_text(
-            text.as_ref(),
-            vec2(min_x, min_y),
-            scale,
-            color,
-            4,
+        super::text::build_text(
             &mut self.model,
+            text.as_ref(),
+            scale as u32,
+            vec2(min_x, min_y),
+            color,
         )
     }
 
@@ -267,7 +260,7 @@ impl<'a, 'b, 'f> Painter<'a, 'b, 'f> {
         let w = bounds.height() * 0.5;
         let points = [bounds.min + vec2(0.0, w), bounds.max - vec2(0.0, w)];
         self.model
-            .line(points, w, &TexCoords::WHITE, self.style.item_color);
+            .line(points, w, &MAIN_ATLAS.white, self.style.item_color);
     }
 
     pub fn upload(&self, gpu: &Gpu) -> GpuModel {
@@ -407,7 +400,7 @@ pub fn button<T: AsRef<str>>(shape: Rect, label: T, painter: &mut Painter) -> Bu
     let mut rs = ButtonRs::default();
     let Interaction { color, clicked, .. } = painter.interact(shape);
 
-    painter.model.rect(shape, &TexCoords::WHITE, color);
+    painter.model.rect(shape, &MAIN_ATLAS.white, color);
     painter.text(shape, label);
 
     if clicked {
@@ -416,10 +409,10 @@ pub fn button<T: AsRef<str>>(shape: Rect, label: T, painter: &mut Painter) -> Bu
     rs
 }
 
-pub fn image_button(shape: Rect, tex: &TexCoords, painter: &mut Painter) -> ButtonRs {
+pub fn image_button(shape: Rect, tex: &Image, painter: &mut Painter) -> ButtonRs {
     let mut rs = ButtonRs::default();
     let Interaction { color, clicked, .. } = painter.interact(shape);
-    painter.model.rect(shape, &TexCoords::WHITE, color);
+    painter.model.rect(shape, &MAIN_ATLAS.white, color);
     painter.model.rect(shape, tex, Color::WHITE.into());
     if clicked {
         rs.triggered = true;
@@ -454,6 +447,9 @@ pub fn text_edit<T: AsRef<str>>(
     }
 
     if field.focused {
+        if painter.input.pasted_text().len() > 0 {
+            field.text += painter.input.pasted_text();
+        }
         if let Some(input) = &painter.input.text_input() {
             field.text = input.text.clone();
             field.cursor = input.selection.end;
@@ -462,11 +458,8 @@ pub fn text_edit<T: AsRef<str>>(
                 field.cursor -= 1;
             }
         } else if let Some(ch) = painter.input.char_press() {
-            // if painter.font.char_is_visible(ch) {
-            if !ch.is_whitespace() {
-                field.text.push(ch);
-                field.cursor += 1;
-            }
+            field.text.push(ch);
+            field.cursor += 1;
         }
         painter.text_input = Some(TextInputState {
             text: field.text.clone(),
@@ -476,7 +469,7 @@ pub fn text_edit<T: AsRef<str>>(
     }
 
     field.cursor = field.text.len() as u32;
-    painter.model.rect(shape, &TexCoords::WHITE, color);
+    painter.model.rect(shape, &MAIN_ATLAS.white, color);
     if field.focused {
         painter
             .model
@@ -484,10 +477,6 @@ pub fn text_edit<T: AsRef<str>>(
 
         // CURSOR:
         let sc = shape.height();
-
-        // cursor: 0
-        //
-
         let char_idx = if field.cursor == 0 {
             0
         } else {
@@ -503,13 +492,13 @@ pub fn text_edit<T: AsRef<str>>(
         } else {
             &field.text[0..char_idx]
         };
-        let offset = painter.font.text_size(text_before_cursor, sc).x;
+        let offset = painter.text_size(text_before_cursor, sc).x;
         let min = shape.min + vec2(offset, sc * 0.05);
         let size = vec2(sc * 0.1, sc * 0.9);
 
         let color = painter.style.text_color;
         let rect = Rect::from_min_size(min, size);
-        painter.model.rect(rect, &TexCoords::WHITE, color);
+        painter.model.rect(rect, &MAIN_ATLAS.white, color);
     }
 
     let text_color = match field.text.is_empty() {
@@ -522,17 +511,7 @@ pub fn text_edit<T: AsRef<str>>(
     };
 
     if !text.is_empty() {
-        let text_scale = shape.height();
-        let text_origin = shape.min;
-        painter.font.build_text(
-            // 5.0,
-            text,
-            text_origin,
-            text_scale,
-            text_color,
-            6,
-            &mut painter.model,
-        );
+        painter.custom_text(shape, text, text_color, Align2::MIN);
     }
 }
 
@@ -549,6 +528,6 @@ where
         state.advance();
         *changed = true;
     }
-    painter.model.rect(shape, &TexCoords::WHITE, color);
+    painter.model.rect(shape, &MAIN_ATLAS.white, color);
     painter.text(shape, state.label());
 }

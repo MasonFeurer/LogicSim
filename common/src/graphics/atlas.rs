@@ -1,43 +1,107 @@
 use crate::gpu::Gpu;
-use glam::{vec2, Vec2};
+use glam::{ivec2, uvec2, IVec2, UVec2};
 
-static ATLAS_FILE: &[u8] = include_bytes!("../../include/atlas2.png");
-const ATLAS_SIZE: u32 = 128;
+#[derive(Clone)]
+pub struct Image {
+    uv: (UVec2, UVec2),
+    origin: IVec2,
+}
+impl Image {
+    pub const ZERO: Self = Self {
+        uv: (UVec2::ZERO, UVec2::ZERO),
+        origin: IVec2::ZERO,
+    };
 
-const N0: f32 = 0.0;
-const N1: f32 = 1.0 / ATLAS_SIZE as f32;
-const N39: f32 = 39.0 / ATLAS_SIZE as f32; // 38 + 1
-const N77: f32 = 77.0 / ATLAS_SIZE as f32; // 38 * 2 + 1
-const N115: f32 = 115.0 / ATLAS_SIZE as f32; // 38 * 3 + 1
+    #[inline(always)]
+    const fn new(x: u32, y: u32, w: u32, h: u32, ox: i32, oy: i32) -> Self {
+        Self {
+            uv: (uvec2(x, y), uvec2(x + w, y + h)),
+            origin: ivec2(ox, oy),
+        }
+    }
 
-pub const WHITE_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [vec2(N0, N0), vec2(N1, N0), vec2(N1, N1), vec2(N0, N1)],
-};
-pub const DOWN_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [vec2(N1, N1), vec2(N39, N1), vec2(N39, N39), vec2(N1, N39)],
-};
-pub const OPTIONS_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [vec2(N39, N1), vec2(N77, N1), vec2(N77, N39), vec2(N39, N39)],
-};
-pub const SAVE_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [
-        vec2(N77, N1),
-        vec2(N115, N1),
-        vec2(N115, N39),
-        vec2(N77, N39),
-    ],
-};
-pub const CONFIRM_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [vec2(N1, N39), vec2(N39, N39), vec2(N39, N77), vec2(N1, N77)],
-};
-pub const CANCEL_TEX_COORDS: TexCoords = TexCoords {
-    uv_coords: [
-        vec2(N39, N39),
-        vec2(N77, N39),
-        vec2(N77, N77),
-        vec2(N39, N77),
-    ],
-};
+    #[inline(always)]
+    pub fn origin(&self) -> IVec2 {
+        self.origin
+    }
+
+    #[inline(always)]
+    pub fn size(&self) -> UVec2 {
+        self.uv.1 - self.uv.0
+    }
+    #[inline(always)]
+    pub fn uv_coords(&self) -> [UVec2; 4] {
+        [
+            uvec2(self.uv.0.x, self.uv.0.y),
+            uvec2(self.uv.1.x, self.uv.0.y),
+            uvec2(self.uv.1.x, self.uv.1.y),
+            uvec2(self.uv.0.x, self.uv.1.y),
+        ]
+    }
+}
+
+pub struct FontKey<'a> {
+    pub name: &'a str,
+    pub size: u32,
+    pub bold: bool,
+    pub italic: bool,
+}
+impl<'a> FontKey<'a> {
+    pub const fn new(name: &'a str, size: u32, bold: bool, italic: bool) -> Self {
+        Self {
+            name,
+            size,
+            bold,
+            italic,
+        }
+    }
+}
+
+pub struct StaticFont(&'static [Image]);
+impl StaticFont {
+    pub fn get_char_image(&self, ch: char) -> &Image {
+        self.0.get(ch as usize).unwrap_or(&self.0[0])
+    }
+}
+
+pub struct StaticAtlasData {
+    pub file: &'static [u8],
+    pub size: u32,
+    pub replacement_image: Image,
+    pub white: Image,
+    pub images: &'static [(&'static str, Image)],
+    pub fonts: &'static [(FontKey<'static>, StaticFont)],
+}
+impl StaticAtlasData {
+    pub fn get_image(&self, name: &str) -> &Image {
+        self.images
+            .iter()
+            .find(|(key, _)| *key == name)
+            .map(|(_key, img)| img)
+            .unwrap_or(&self.replacement_image)
+    }
+
+    pub fn get_font(
+        &self,
+        _size: u32,
+        bold: bool,
+        italic: bool,
+    ) -> &(FontKey<'static>, StaticFont) {
+        self.fonts
+            .iter()
+            .find(|(key, _font)| key.bold == bold && key.italic == italic)
+            .unwrap_or(&self.fonts[0])
+    }
+}
+impl std::ops::Index<&str> for StaticAtlasData {
+    type Output = Image;
+    fn index(&self, name: &str) -> &Image {
+        self.get_image(name)
+    }
+}
+
+// Should define `static MAIN_ATLAS: StaticAtlasData`
+include!("../../include/atlas_data.rs");
 
 pub struct Atlas {
     pub handle: wgpu::Texture,
@@ -48,8 +112,8 @@ impl Atlas {
     pub fn new(gpu: &Gpu) -> Self {
         use wgpu::*;
         let size = Extent3d {
-            width: ATLAS_SIZE,
-            height: ATLAS_SIZE,
+            width: MAIN_ATLAS.size,
+            height: MAIN_ATLAS.size,
             depth_or_array_layers: 1,
         };
         let handle = gpu.device.create_texture(&TextureDescriptor {
@@ -65,7 +129,9 @@ impl Atlas {
         let view = handle.create_view(&TextureViewDescriptor::default());
         let sampler = gpu.device.create_sampler(&SamplerDescriptor::default());
 
-        let atlas = image::load_from_memory(ATLAS_FILE).unwrap().into_rgba8();
+        let atlas = image::load_from_memory(MAIN_ATLAS.file)
+            .unwrap()
+            .into_rgba8();
 
         gpu.queue.write_texture(
             ImageCopyTexture {
@@ -77,8 +143,8 @@ impl Atlas {
             atlas.as_raw(),
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: Some(4 * ATLAS_SIZE),
-                rows_per_image: Some(ATLAS_SIZE),
+                bytes_per_row: Some(4 * MAIN_ATLAS.size),
+                rows_per_image: Some(MAIN_ATLAS.size),
             },
             size,
         );
@@ -88,17 +154,4 @@ impl Atlas {
             sampler,
         }
     }
-}
-
-#[derive(Clone)]
-pub struct TexCoords {
-    pub uv_coords: [Vec2; 4],
-}
-impl TexCoords {
-    pub const WHITE: Self = WHITE_TEX_COORDS;
-    pub const DOWN: Self = DOWN_TEX_COORDS;
-    pub const OPTIONS: Self = OPTIONS_TEX_COORDS;
-    pub const SAVE: Self = SAVE_TEX_COORDS;
-    pub const CONFIRM: Self = CONFIRM_TEX_COORDS;
-    pub const CANCEL: Self = CANCEL_TEX_COORDS;
 }

@@ -62,6 +62,7 @@ pub struct InputState {
     drag: Option<Drag>,
 
     modifiers: Modifiers,
+    pasted_text: String,
     down_ptr_buttons: [bool; 5],
     text_input: Option<TextInputState>,
     scroll: Vec2,
@@ -153,6 +154,10 @@ impl InputState {
     pub fn set_modifiers(&mut self, m: Modifiers) {
         self.modifiers = m;
     }
+    #[inline(always)]
+    pub fn pasted_text(&self) -> &str {
+        &self.pasted_text
+    }
 
     // ---- Pointer Button Input ----
     #[inline(always)]
@@ -215,12 +220,14 @@ impl InputState {
         self.ptr_press = None;
         self.key_press = None;
         self.char_press = None;
+        self.pasted_text.clear();
         self.zoom = 0.0;
         self.scroll = Vec2::ZERO;
     }
 
     pub fn on_event(&mut self, event: InputEvent) {
         match event {
+            InputEvent::Paste(text) => self.pasted_text += &text,
             InputEvent::Click(pos, button) => self.ptr_click = Some((button, pos)),
             InputEvent::Press(pos, button) => {
                 self.down_ptr_buttons[usize::from(button)] = true;
@@ -295,6 +302,7 @@ pub enum InputEvent {
     PointerLeft,
     Scroll(Vec2),
     Zoom(f32),
+    Paste(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

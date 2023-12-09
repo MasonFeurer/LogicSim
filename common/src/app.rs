@@ -1,6 +1,6 @@
 use crate::gpu::Gpu;
 use crate::graphics::ui::{Align, Align2, CycleState, Painter, Placer, Style, TextField};
-use crate::graphics::{Color, Font, Model, Rect, Renderer, TexCoords};
+use crate::graphics::{Color, Model, Rect, Renderer, MAIN_ATLAS};
 use crate::input::{InputState, PtrButton, TextInputState};
 use crate::sim::{self, save, scene, Sim};
 use crate::Id;
@@ -149,7 +149,6 @@ pub struct OptionsMenu {
     ui_size: Rect,
     ui_theme: Rect,
     frame_count: Rect,
-    glyph_cache_count: Rect,
     done: Rect,
 }
 impl OptionsMenu {
@@ -170,7 +169,6 @@ impl OptionsMenu {
             rs.ui_size = placer.next();
             rs.ui_theme = placer.next();
             rs.frame_count = placer.next();
-            rs.glyph_cache_count = placer.next();
             rs.done = placer.next();
         }
         rs
@@ -185,10 +183,6 @@ impl OptionsMenu {
         painter.cycle(self.ui_size, &mut state.ui_size, rebuild);
         painter.cycle(self.ui_theme, &mut state.ui_theme, &mut false);
         painter.text(self.frame_count, format!("frames: {}", state.frame_count));
-        painter.text(
-            self.glyph_cache_count,
-            format!("cached glyphs: {}", painter.font.glyph_model_cache.len()),
-        );
         if painter.button(self.done, "Done").triggered {
             state.open_menu = None;
         }
@@ -222,12 +216,15 @@ impl OverlayUi {
     fn show(&self, painter: &mut Painter, state: &mut UiState) {
         painter.menu_background(self.background);
         if painter
-            .image_button(self.options, &TexCoords::OPTIONS)
+            .image_button(self.options, &MAIN_ATLAS["options_icon"])
             .triggered
         {
             state.open_menu = Some(Menu::Options);
         }
-        if painter.image_button(self.save, &TexCoords::SAVE).triggered {
+        if painter
+            .image_button(self.save, &MAIN_ATLAS["add_icon"])
+            .triggered
+        {
             state.open_menu = Some(Menu::Save);
         }
         painter.text(self.fps, format!("fps: {}", state.fps));
@@ -360,13 +357,13 @@ impl PlaceChipsUi {
     fn show(&self, painter: &mut Painter, place_chips: &mut bool, cancel_place_chips: &mut bool) {
         painter.menu_background(self.background);
         if painter
-            .image_button(self.confirm, &TexCoords::CONFIRM)
+            .image_button(self.confirm, &MAIN_ATLAS["confirm_icon"])
             .triggered
         {
             *place_chips = true;
         }
         if painter
-            .image_button(self.cancel, &TexCoords::CANCEL)
+            .image_button(self.cancel, &MAIN_ATLAS["cancel_icon"])
             .triggered
         {
             *cancel_place_chips = true;
@@ -450,7 +447,6 @@ pub struct App {
     pub chips_in_hand: Vec<u32>,
     pub ui_state: UiState,
     pub place_chips_pos: Vec2,
-    pub font: Font<'static>,
     pub last_fps_update: Option<SystemTime>,
     pub frame_count: u32,
     pub painter_model: Model,
@@ -528,6 +524,7 @@ impl App {
         let mut renderer = Renderer::new(&gpu);
         renderer.update_size(&gpu, win_size.as_vec2());
         renderer.update_global_transform(&gpu, Default::default());
+        renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
         self.layouts_dirty = true;
         self.place_chips_pos = win_size.as_vec2() * 0.5;
 
@@ -608,11 +605,8 @@ impl App {
         self.sim.update();
 
         // ----------------- Start Drawing --------------------
-        if self.font.should_purge() {
-            self.font.purge();
-        }
         self.painter_model.clear();
-        let mut painter = Painter::new(&style, input, &mut self.painter_model, &mut self.font);
+        let mut painter = Painter::new(&style, input, &mut self.painter_model);
 
         // ---- Draw Scene ----
         self.scene

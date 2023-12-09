@@ -3,6 +3,7 @@ struct Locals {
 	screen_size: vec2<f32>,
 	global_offset: vec2<f32>,
 	global_scale: f32,
+	texture_size: u32,
 }
 
 @group(0) @binding(0) var<uniform> u_locals: Locals;
@@ -36,7 +37,7 @@ fn position_from_screen(screen_pos: vec2<f32>) -> vec4<f32> {
 
 struct Vertex {
 	@location(0) pos: vec2<f32>,
-	@location(1) uv: vec2<f32>,
+	@location(1) uv: vec2<u32>,
 	@location(2) color_or_node: u32,
 	@location(3) is_node_addr: u32,
 }
@@ -52,7 +53,7 @@ fn vs_main(in: Vertex) -> Fragment {
 	var out: Fragment;
 	out.pos = position_from_screen(in.pos * u_locals.global_scale + u_locals.global_offset);
 
-	out.uv = in.uv;
+	out.uv = vec2<f32>(in.uv) / f32(u_locals.texture_size);
 	if in.is_node_addr == 1u {
 		let state = node_state(in.color_or_node);
 		out.color = unpack_color(u_locals.node_state_color[state]);

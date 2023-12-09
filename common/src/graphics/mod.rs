@@ -7,7 +7,6 @@ pub mod ui;
 pub use atlas::*;
 pub use model::*;
 pub use renderer::*;
-pub use text::*;
 
 use crate::sim::NodeAddr;
 use glam::{vec2, vec4, Vec2, Vec4};

@@ -1,5 +1,5 @@
 use crate::graphics::ui::Painter;
-use crate::graphics::{Color, PanZoomTransform, Rect, TexCoords};
+use crate::graphics::{Color, PanZoomTransform, Rect, MAIN_ATLAS};
 use crate::input::PtrButton;
 use crate::sim::{save, NodeAddr, NodeRegion, Sim, SourceTy};
 use glam::{vec2, Vec2};
@@ -141,7 +141,7 @@ impl DeviceImpl for Chip {
         };
         painter
             .model
-            .rounded_rect(rect, 3.0, 20, &TexCoords::WHITE, chip_color);
+            .rounded_rect(rect, 3.0, 20, &MAIN_ATLAS.white, chip_color);
 
         let mut y = rect.min.y + NODE_SPACING + NODE_SIZE * 0.5;
         for (addr, _name) in &self.l_nodes {

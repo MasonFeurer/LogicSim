@@ -1,22 +1,22 @@
-use super::{ColorSrc, Rect, TexCoords, Transform};
+use super::{ColorSrc, Image, Rect, Transform, MAIN_ATLAS};
 use crate::slice_as_byte_slice;
-use glam::{vec2, Vec2};
+use glam::{vec2, UVec2, Vec2};
 
 pub type Index = u32;
 
 pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Uint32, 3 => Uint32];
+    wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32x2, 2 => Uint32, 3 => Uint32];
 
 #[derive(Clone)]
 #[repr(C)]
 pub struct Vertex {
     pos: [f32; 2],
-    uv: [f32; 2],
+    uv: [u32; 2],
     color_or_node: u32,
     is_node_addr: u32,
 }
 impl Vertex {
-    pub fn new(pos: Vec2, uv: Vec2, color: ColorSrc) -> Self {
+    pub fn new(pos: Vec2, uv: UVec2, color: ColorSrc) -> Self {
         let (color_or_node, is_node_addr) = match color {
             ColorSrc::Node(addr) => (addr.0, 1),
             ColorSrc::Set(c) => (c.0, 0),
@@ -112,26 +112,26 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn tri(&mut self, points: [Vec2; 3], tex: &TexCoords, color: ColorSrc) {
+    pub fn tri(&mut self, points: [Vec2; 3], tex: &Image, color: ColorSrc) {
         self.raw_tri([
-            Vertex::new(points[0], tex.uv_coords[0], color),
-            Vertex::new(points[1], tex.uv_coords[1], color),
-            Vertex::new(points[2], tex.uv_coords[2], color),
+            Vertex::new(points[0], tex.uv_coords()[0], color),
+            Vertex::new(points[1], tex.uv_coords()[1], color),
+            Vertex::new(points[2], tex.uv_coords()[2], color),
         ]);
     }
 
     #[inline(always)]
-    pub fn quad(&mut self, points: [Vec2; 4], tex: &TexCoords, color: ColorSrc) {
+    pub fn quad(&mut self, points: [Vec2; 4], tex: &Image, color: ColorSrc) {
         self.raw_quad([
-            Vertex::new(points[0], tex.uv_coords[0], color),
-            Vertex::new(points[1], tex.uv_coords[1], color),
-            Vertex::new(points[2], tex.uv_coords[2], color),
-            Vertex::new(points[3], tex.uv_coords[3], color),
+            Vertex::new(points[0], tex.uv_coords()[0], color),
+            Vertex::new(points[1], tex.uv_coords()[1], color),
+            Vertex::new(points[2], tex.uv_coords()[2], color),
+            Vertex::new(points[3], tex.uv_coords()[3], color),
         ]);
     }
 
     #[inline(always)]
-    pub fn line(&mut self, points: [Vec2; 2], w: f32, tex: &TexCoords, color: ColorSrc) {
+    pub fn line(&mut self, points: [Vec2; 2], w: f32, tex: &Image, color: ColorSrc) {
         let [a, b] = points;
         let p = (b - a).perp().normalize();
         let quad = [
@@ -149,7 +149,7 @@ impl Model {
         for step in 1..=detail {
             let t = step as f32 / detail as f32;
             let p = lerp_quad(a, ctrl, b, t);
-            self.line([prev_point, p], w, &TexCoords::WHITE, color);
+            self.line([prev_point, p], w, &MAIN_ATLAS.white, color);
             prev_point = p;
         }
     }
@@ -160,13 +160,13 @@ impl Model {
         for step in 1..=detail {
             let t = step as f32 / detail as f32;
             let p = lerp_cube(a, ctrl0, ctrl1, b, t);
-            self.line([prev_point, p], w, &TexCoords::WHITE, color);
+            self.line([prev_point, p], w, &MAIN_ATLAS.white, color);
             prev_point = p;
         }
     }
 
     pub fn circle(&mut self, center: Vec2, r: f32, detail: u32, color: ColorSrc) {
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         let mut prev_pos = center + vec2(0.0f32.sin(), 0.0f32.cos()) * r;
         for step in 1..=detail {
             let angle = (step as f32 / detail as f32) * std::f32::consts::TAU;
@@ -177,7 +177,7 @@ impl Model {
     }
 
     pub fn circle_outline(&mut self, center: Vec2, r: f32, w: f32, detail: u32, color: ColorSrc) {
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         let mut prev_pos = center + vec2(0.0f32.sin(), 0.0f32.cos()) * r;
         for step in 1..=detail {
             let angle = (step as f32 / detail as f32) * std::f32::consts::TAU;
@@ -196,7 +196,7 @@ impl Model {
         color: ColorSrc,
     ) {
         const TAU: f32 = std::f32::consts::TAU;
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         let range_size = range[1] - range[0];
         let mut prev_pos = center + vec2((range[0] * TAU).sin(), (range[0] * TAU).cos()) * r;
         for step in 1..=detail {
@@ -217,7 +217,7 @@ impl Model {
         color: ColorSrc,
     ) {
         const TAU: f32 = std::f32::consts::TAU;
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         let range_size = range[1] - range[0];
         let mut prev_pos = center + vec2((range[0] * TAU).sin(), (range[0] * TAU).cos()) * r;
         for step in 1..=detail {
@@ -229,26 +229,19 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn rect(&mut self, rect: Rect, tex: &TexCoords, color: ColorSrc) {
+    pub fn rect(&mut self, rect: Rect, tex: &Image, color: ColorSrc) {
         self.quad(rect.corners(), tex, color);
     }
 
     pub fn rect_outline(&mut self, rect: Rect, w: f32, color: ColorSrc) {
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         self.line([rect.tl(), rect.tr()], w, &tex, color);
         self.line([rect.tr(), rect.br()], w, &tex, color);
         self.line([rect.bl(), rect.br()], w, &tex, color);
         self.line([rect.tl(), rect.bl()], w, &tex, color);
     }
 
-    pub fn rounded_rect(
-        &mut self,
-        rect: Rect,
-        r: f32,
-        detail: u32,
-        tex: &TexCoords,
-        color: ColorSrc,
-    ) {
+    pub fn rounded_rect(&mut self, rect: Rect, r: f32, detail: u32, tex: &Image, color: ColorSrc) {
         let (tl, tr, bl, br) = (rect.tl(), rect.tr(), rect.bl(), rect.br());
 
         let rect = Rect::from_min_max(rect.min + r, rect.max - r);
@@ -277,7 +270,7 @@ impl Model {
         detail: u32,
         color: ColorSrc,
     ) {
-        let tex = TexCoords::WHITE;
+        let tex = &MAIN_ATLAS.white;
         let (tl, tr, bl, br) = (rect.tl(), rect.tr(), rect.bl(), rect.br());
 
         self.circle_outline_section(tl + vec2(r, r), r, w, detail, [0.50, 0.75], color);
