@@ -115,7 +115,7 @@ impl TouchTranslater {
                 .duration_since(self.last_press_time)
                 .unwrap_or(Duration::ZERO)
                 .as_millis()
-                > 1000
+                > 500
         {
             out(LogisimInputEvent::Click(self.last_pos, PtrButton::RIGHT));
             self.ignore_release = true;

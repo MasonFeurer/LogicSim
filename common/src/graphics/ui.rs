@@ -138,6 +138,7 @@ impl Align2 {
 #[non_exhaustive]
 pub struct Interaction {
     pub clicked: bool,
+    pub rclicked: bool,
     pub clicked_elsewhere: bool,
     pub color: ColorSrc,
     pub hovered: bool,
@@ -191,6 +192,7 @@ impl<'a, 'b> Painter<'a, 'b> {
         } else {
             self.style.item_color
         };
+        rs.rclicked = self.input.area_clicked(shape, PtrButton::RIGHT);
         rs.clicked = self.input.area_clicked(shape, PtrButton::LEFT);
         rs.clicked_elsewhere = self.input.area_outside_clicked(shape, PtrButton::LEFT);
         rs
@@ -203,7 +205,11 @@ impl<'a, 'b> Painter<'a, 'b> {
 
     pub fn button<T: AsRef<str>>(&mut self, shape: Rect, label: T) -> ButtonRs {
         self.debug_shape(shape);
-        button(shape, label, self)
+        button(shape, label, self, false)
+    }
+    pub fn circle_button<T: AsRef<str>>(&mut self, shape: Rect, label: T) -> ButtonRs {
+        self.debug_shape(shape);
+        button(shape, label, self, true)
     }
     pub fn image_button(&mut self, shape: Rect, tex: &Image) -> ButtonRs {
         self.debug_shape(shape);
@@ -396,11 +402,21 @@ impl<'a> Placer<'a> {
 pub struct ButtonRs {
     pub triggered: bool,
 }
-pub fn button<T: AsRef<str>>(shape: Rect, label: T, painter: &mut Painter) -> ButtonRs {
+pub fn button<T: AsRef<str>>(
+    shape: Rect,
+    label: T,
+    painter: &mut Painter,
+    circle: bool,
+) -> ButtonRs {
     let mut rs = ButtonRs::default();
     let Interaction { color, clicked, .. } = painter.interact(shape);
 
-    painter.model.rect(shape, &MAIN_ATLAS.white, color);
+    match circle {
+        true => painter
+            .model
+            .circle(shape.center(), shape.width() * 0.5, 20, color),
+        false => painter.model.rect(shape, &MAIN_ATLAS.white, color),
+    }
     painter.text(shape, label);
 
     if clicked {

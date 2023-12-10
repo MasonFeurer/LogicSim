@@ -1,7 +1,8 @@
-use crate::graphics::ui::Painter;
+use crate::graphics::ui::{Align2, Painter};
 use crate::graphics::{Color, PanZoomTransform, Rect, MAIN_ATLAS};
 use crate::input::PtrButton;
-use crate::sim::{save, NodeAddr, NodeRegion, Sim, SourceTy};
+use crate::sim::{save, NodeAddr, NodeRegion, Sim};
+use crate::Id;
 use glam::{vec2, Vec2};
 use std::collections::HashMap;
 use std::fmt::Debug;
@@ -32,10 +33,99 @@ pub struct DeviceConnection(pub SceneId, pub Connection);
 #[derive(Debug, Clone)]
 pub struct NamedConnection<'a>(pub &'a str, pub Connection);
 
+const NODE_SPACING: f32 = 5.0;
+const CHIP_W: f32 = 100.0;
+const NODE_SIZE: f32 = 30.0;
+const BG_NODE_SIZE: f32 = 50.0;
+
 #[derive(Debug, Clone, Default)]
 pub struct ExternalNodes {
     pub pos: Vec2,
     pub states: Vec<NodeAddr>,
+}
+impl ExternalNodes {
+    pub fn draw(
+        &mut self,
+        id: Id,
+        transform: &PanZoomTransform,
+        painter: &mut Painter,
+        bg_hovered: &mut bool,
+        sim: &mut Sim,
+        out: &mut SceneOutput,
+    ) {
+        let w = BG_NODE_SIZE;
+        let header_h = painter.style.item_size.y;
+        let h = (self.states.len() as f32 + 1.0) * (NODE_SPACING + w) + NODE_SPACING + header_h;
+        let bounds = Rect::from_min_size(self.pos, vec2(w, h));
+        if painter
+            .input
+            .area_hovered(transform.transform().apply2(bounds))
+        {
+            *bg_hovered = false;
+        }
+        painter
+            .model
+            .rect(bounds, &MAIN_ATLAS.white, painter.style.menu_background);
+        let header_rect = Rect::from_min_size(bounds.min, vec2(w, painter.style.item_size.y));
+        painter.text(header_rect, "IO");
+
+        painter.input.update_drag(
+            id,
+            transform.transform().apply2(bounds),
+            self.pos,
+            PtrButton::LEFT,
+        );
+        if let Some(drag) = painter.input.get_drag_full(id) {
+            let offset = drag.press_pos - transform.transform().apply(drag.anchor);
+            self.pos = transform
+                .inv_transform()
+                .apply(painter.input.ptr_pos() - offset);
+        }
+        // Draw nodes + Add Node Button
+        {
+            let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
+            let mut y = bounds.min.y + header_h + w * 0.5 + NODE_SPACING;
+            let x = bounds.min.x + w * 0.5;
+
+            for addr in &self.states {
+                let center = vec2(x, y);
+                let state = sim.nodes[addr.0 as usize].state();
+
+                let fill_color = node_colors[state as usize];
+                let int = painter.interact(Rect::from_circle(center, w * 0.5));
+                if int.clicked {
+                    out.clicked_output = Some(*addr);
+                    // if sim.nodes[addr.0 as usize].source().ty() == SourceTy::None {
+                    //     out.clicked_input = Some(*addr);
+                    // } else {
+                    //     out.clicked_output = Some(*addr);
+                    // }
+                } else if int.rclicked {
+                    out.clicked_input = Some(*addr);
+                }
+                if int.hovered {
+                    painter.model.circle(center, w * 0.5 + 4.0, 20, int.color);
+                }
+                painter.model.circle(center, w * 0.5, 20, fill_color);
+
+                y += w + NODE_SPACING;
+            }
+
+            if painter
+                .circle_button(Rect::from_center_size(vec2(x, y), vec2(w, w)), "+")
+                .triggered
+            {
+                self.states.push(sim.alloc_node());
+            }
+        }
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct SceneOutput {
+    pub clicked_output: Option<NodeAddr>,
+    pub clicked_input: Option<NodeAddr>,
+    pub clicked_chip: Option<SceneId>,
 }
 
 #[derive(Default, Debug)]
@@ -48,8 +138,45 @@ pub struct Scene {
     pub wire_bundles: Vec<WireBundle>,
 }
 impl Scene {
-    pub fn draw(&mut self, painter: &mut Painter, bg_hovered: &mut bool, sim: &mut Sim) {
+    pub fn clear(&mut self) {
+        self.left_nodes.states.clear();
+        self.right_nodes.states.clear();
+        self.devices.clear();
+        self.wires.clear();
+        self.wire_bundles.clear();
+    }
+
+    pub fn init(&mut self, view: Rect) {
+        self.left_nodes.pos = vec2(view.min.x, view.min.y + view.height() * 0.3);
+        self.right_nodes.pos = vec2(view.max.x - BG_NODE_SIZE, view.min.y + view.height() * 0.3);
+    }
+
+    pub fn draw(
+        &mut self,
+        painter: &mut Painter,
+        bg_hovered: &mut bool,
+        sim: &mut Sim,
+    ) -> SceneOutput {
+        let mut out = SceneOutput::default();
         painter.set_transform(self.transform.transform());
+
+        self.left_nodes.draw(
+            Id::new("lio"),
+            &self.transform,
+            painter,
+            bg_hovered,
+            sim,
+            &mut out,
+        );
+        self.right_nodes.draw(
+            Id::new("rio"),
+            &self.transform,
+            painter,
+            bg_hovered,
+            sim,
+            &mut out,
+        );
+
         for (id, device) in &mut self.devices {
             let bounds = device.bounds();
             if painter
@@ -74,9 +201,10 @@ impl Scene {
                         .apply(painter.input.ptr_pos() - offset),
                 );
             }
-            device.draw(Some(*id), painter, sim);
+            device.draw(Some(*id), painter, sim, &mut out);
         }
         painter.reset_transform();
+        out
     }
 
     pub fn add_device(&mut self, device: impl DeviceImpl + 'static) {
@@ -89,14 +217,17 @@ pub trait DeviceImpl: Debug {
     fn get_anchor(&self) -> Vec2;
     fn move_anchor(&mut self, pos: Vec2);
     fn size(&self) -> Vec2;
-    fn draw(&self, id: Option<SceneId>, painter: &mut Painter, sim: &mut Sim);
+    fn draw(
+        &self,
+        id: Option<SceneId>,
+        painter: &mut Painter,
+        sim: &mut Sim,
+        out: &mut SceneOutput,
+    );
     fn bounds(&self) -> Rect;
     fn connection_preview(&self, pos: Vec2) -> Option<NamedConnection>;
+    fn sim_nodes(&self) -> Vec<NodeAddr>;
 }
-
-const NODE_SPACING: f32 = 5.0;
-const CHIP_W: f32 = 60.0;
-const NODE_SIZE: f32 = 30.0;
 
 #[derive(Debug, Clone)]
 pub struct Chip {
@@ -105,11 +236,26 @@ pub struct Chip {
     pub name: String,
     pub orientation: Rotation,
     pub save: Option<save::SaveId>,
-    pub l_nodes: Vec<(NodeAddr, String)>,
-    pub r_nodes: Vec<(NodeAddr, String)>,
+    pub l_nodes: Vec<(NodeAddr, String, save::IoType)>,
+    pub r_nodes: Vec<(NodeAddr, String, save::IoType)>,
     pub inner_nodes: Vec<NodeAddr>,
 }
 impl DeviceImpl for Chip {
+    fn sim_nodes(&self) -> Vec<NodeAddr> {
+        let mut out =
+            Vec::with_capacity(self.l_nodes.len() + self.r_nodes.len() + self.inner_nodes.len());
+        for (addr, ..) in &self.l_nodes {
+            out.push(*addr);
+        }
+        for (addr, ..) in &self.r_nodes {
+            out.push(*addr);
+        }
+        for addr in &self.inner_nodes {
+            out.push(*addr);
+        }
+        out
+    }
+
     fn get_anchor(&self) -> Vec2 {
         self.pos
     }
@@ -124,7 +270,13 @@ impl DeviceImpl for Chip {
             max_nodes * (NODE_SIZE + NODE_SPACING) + NODE_SPACING,
         )
     }
-    fn draw(&self, id: Option<SceneId>, painter: &mut Painter, sim: &mut Sim) {
+    fn draw(
+        &self,
+        id: Option<SceneId>,
+        painter: &mut Painter,
+        sim: &mut Sim,
+        out: &mut SceneOutput,
+    ) {
         // let node_color = Color::shade(40).into();
         let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
 
@@ -136,23 +288,31 @@ impl DeviceImpl for Chip {
         let rect = Rect::from_center_size(self.pos, size);
 
         let chip_color = match id {
-            Some(_) => Color::shade(200).into(),
-            None => Color::shade(100).into(),
+            Some(_) => painter.style.item_color,
+            None => Color::shade(125).into(),
         };
         painter
             .model
             .rounded_rect(rect, 3.0, 20, &MAIN_ATLAS.white, chip_color);
 
+        let chip_int = painter.interact(rect);
+        if chip_int.clicked {
+            out.clicked_chip = id;
+        }
+
         let mut y = rect.min.y + NODE_SPACING + NODE_SIZE * 0.5;
-        for (addr, _name) in &self.l_nodes {
+        for (addr, _name, ty) in &self.l_nodes {
             let center = vec2(rect.min.x, y);
             let size = NODE_SIZE * 0.5;
             let state = sim.nodes[addr.0 as usize].state();
 
             let fill_color = node_colors[state as usize];
             let int = painter.interact(Rect::from_circle(center, size));
-            if int.clicked && sim.nodes[addr.0 as usize].source().ty() == SourceTy::None {
-                sim.nodes[addr.0 as usize].set_state(!state);
+            if int.clicked {
+                match ty {
+                    &save::IoType::Input => out.clicked_input = Some(*addr),
+                    &save::IoType::Output => out.clicked_output = Some(*addr),
+                }
             }
             if int.hovered {
                 painter.model.circle(center, size + 4.0, 20, int.color);
@@ -163,15 +323,18 @@ impl DeviceImpl for Chip {
         }
 
         y = rect.min.y + NODE_SPACING + NODE_SIZE * 0.5;
-        for (addr, _name) in &self.r_nodes {
+        for (addr, _name, ty) in &self.r_nodes {
             let center = vec2(rect.max.x, y);
             let size = NODE_SIZE * 0.5;
             let state = sim.nodes[addr.0 as usize].state();
 
             let fill_color = node_colors[state as usize];
             let int = painter.interact(Rect::from_circle(center, size));
-            if int.clicked && sim.nodes[addr.0 as usize].source().ty() == SourceTy::None {
-                sim.nodes[addr.0 as usize].set_state(!state);
+            if int.clicked {
+                match ty {
+                    &save::IoType::Input => out.clicked_input = Some(*addr),
+                    &save::IoType::Output => out.clicked_output = Some(*addr),
+                }
             }
             if int.hovered {
                 painter.model.circle(center, size + 4.0, 20, int.color);
@@ -180,6 +343,12 @@ impl DeviceImpl for Chip {
 
             y += NODE_SIZE + NODE_SPACING;
         }
+        painter.custom_text(
+            Rect::from_center_size(self.pos, size * 0.5),
+            &self.name,
+            painter.style.text_color,
+            Align2::CENTER,
+        );
     }
 
     fn bounds(&self) -> Rect {

@@ -43,6 +43,13 @@ impl std::fmt::Debug for Node {
     }
 }
 impl Node {
+    pub const ZERO: Self = Self(0);
+
+    pub const fn new(state: bool, src: Source) -> Self {
+        let state = ((state as u64) << 63) | (src.0 & 0x7FFFFFFFFFFFFFFF);
+        Self(state)
+    }
+
     #[inline(always)]
     pub const fn state(&self) -> bool {
         (self.0 >> 63) == 1
@@ -194,6 +201,12 @@ impl NodeRegion {
         }
         src
     }
+
+    #[inline(always)]
+    pub fn map_node(&self, mut node: Node) -> Node {
+        node.set_source(self.map_src(node.source()));
+        node
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -220,8 +233,29 @@ impl Default for Sim {
     }
 }
 impl Sim {
+    pub fn clear(&mut self) {
+        self.nodes = vec![Node::default()];
+        self.next_region = 1;
+    }
+
     pub fn set_node_src(&mut self, addr: NodeAddr, src: Source) {
         self.nodes[addr.0 as usize].set_source(src);
+    }
+
+    #[inline(always)]
+    pub fn set_node(&mut self, addr: NodeAddr, node: Node) {
+        self.nodes[addr.0 as usize] = node;
+    }
+    #[inline(always)]
+    pub fn get_node(&self, addr: NodeAddr) -> Node {
+        self.nodes
+            .get(addr.0 as usize)
+            .copied()
+            .unwrap_or(Node::ZERO)
+    }
+
+    pub fn alloc_node(&mut self) -> NodeAddr {
+        self.alloc_region(1).min
     }
 
     pub fn alloc_region(&mut self, size: u32) -> NodeRegion {

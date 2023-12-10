@@ -2,7 +2,8 @@ use crate::gpu::Gpu;
 use crate::graphics::ui::{Align, Align2, CycleState, Painter, Placer, Style, TextField};
 use crate::graphics::{Color, Model, Rect, Renderer, MAIN_ATLAS};
 use crate::input::{InputState, PtrButton, TextInputState};
-use crate::sim::{self, save, scene, Sim};
+use crate::save::ChipSave;
+use crate::sim::{self, save, scene, NodeAddr, Sim, Source};
 use crate::Id;
 
 use glam::{UVec2, Vec2};
@@ -87,6 +88,8 @@ pub struct UiState {
     chip_name: TextField,
     open_menu: Option<Menu>,
     fps: u32,
+    triggered_save: bool,
+    clear_scene: bool,
 }
 impl Default for UiState {
     fn default() -> Self {
@@ -98,6 +101,8 @@ impl Default for UiState {
             chip_name: TextField::default(),
             open_menu: None,
             fps: 0,
+            triggered_save: false,
+            clear_scene: false,
         }
     }
 }
@@ -116,7 +121,7 @@ impl UiState {
 
         if matches!(self.ui_theme, UiTheme::Light) {
             rs.text_color = Color::shade(0).into();
-            rs.background = Color::shade(255 - 6 * 5);
+            rs.background = Color::shade(255 - 8 * 5);
             rs.menu_background = Color::shade(255 - 10 * 5).into();
             rs.item_color = Color::shade(255 - 30 * 5).into();
             rs.item_hover_color = Color::shade(255 - 20 * 5).into();
@@ -148,7 +153,7 @@ pub struct OptionsMenu {
     info: Rect,
     ui_size: Rect,
     ui_theme: Rect,
-    frame_count: Rect,
+    clear_scene: Rect,
     done: Rect,
 }
 impl OptionsMenu {
@@ -168,7 +173,7 @@ impl OptionsMenu {
             rs.info = placer.next();
             rs.ui_size = placer.next();
             rs.ui_theme = placer.next();
-            rs.frame_count = placer.next();
+            rs.clear_scene = placer.next();
             rs.done = placer.next();
         }
         rs
@@ -182,7 +187,9 @@ impl OptionsMenu {
         }
         painter.cycle(self.ui_size, &mut state.ui_size, rebuild);
         painter.cycle(self.ui_theme, &mut state.ui_theme, &mut false);
-        painter.text(self.frame_count, format!("frames: {}", state.frame_count));
+        if painter.button(self.clear_scene, "Clear Scene").triggered {
+            state.clear_scene = true;
+        }
         if painter.button(self.done, "Done").triggered {
             state.open_menu = None;
         }
@@ -198,6 +205,10 @@ pub struct OverlayUi {
 }
 impl OverlayUi {
     fn new(style: &Style, view_bounds: Rect) -> Self {
+        let mut style = style.clone();
+        style.text_align = Align2::MIN;
+        style.item_size.x *= 0.6;
+
         let mut placer = Placer::new(
             &style,
             view_bounds.min,
@@ -238,6 +249,7 @@ pub struct SaveMenu {
     title_sep: Rect,
     name: Rect,
     chip_ty: Rect,
+    cancel: Rect,
     done: Rect,
 }
 impl SaveMenu {
@@ -256,6 +268,7 @@ impl SaveMenu {
             rs.title_sep = placer.seperator();
             rs.name = placer.next();
             rs.chip_ty = placer.next();
+            rs.cancel = placer.next();
             rs.done = placer.next();
         }
         rs
@@ -267,8 +280,11 @@ impl SaveMenu {
         painter.seperator(self.title_sep);
         painter.text_edit(self.name, "Name", &mut state.chip_name);
         painter.cycle(self.chip_ty, &mut state.chip_ty, &mut false);
-        if painter.button(self.done, "Done").triggered {
+        if painter.button(self.cancel, "Cancel").triggered {
             state.open_menu = None;
+        }
+        if painter.button(self.done, "Done").triggered {
+            state.triggered_save = true;
         }
     }
 }
@@ -451,15 +467,16 @@ pub struct App {
     pub frame_count: u32,
     pub painter_model: Model,
     pub layouts_dirty: bool,
+    pub start_wire: Option<NodeAddr>,
 }
 impl App {
     pub fn new() -> Self {
         let mut app = Self::default();
-        let nand_table = sim::TruthTable {
+        let and_table = sim::TruthTable {
             num_inputs: 2,
             num_outputs: 1,
-            name: "Nand".into(),
-            map: Box::new([1, 0, 0, 0]),
+            name: "And".into(),
+            map: Box::new([0, 0, 0, 1]),
         };
         let not_table = sim::TruthTable {
             num_inputs: 1,
@@ -467,23 +484,26 @@ impl App {
             name: "Not".into(),
             map: Box::new([1, 0]),
         };
-        app.sim.tables = vec![nand_table, not_table];
-        let nand = save::ChipSave {
+        app.sim.tables = vec![and_table, not_table];
+        let and = save::ChipSave {
             region_size: 3,
-            name: "Nand".into(),
+            name: "And".into(),
             scene: None,
             l_nodes: vec![
-                ("a".into(), sim::NodeAddr(0), sim::Source::new_none()),
-                ("b".into(), sim::NodeAddr(1), sim::Source::new_none()),
+                ("a".into(), sim::NodeAddr(0), sim::Node::ZERO),
+                ("b".into(), sim::NodeAddr(1), sim::Node::ZERO),
             ],
             r_nodes: vec![(
                 "out".into(),
                 sim::NodeAddr(2),
-                sim::Source::new_table(sim::TruthTableSource {
-                    inputs: sim::NodeAddr(0),
-                    output: 0,
-                    id: sim::TruthTableId(0),
-                }),
+                sim::Node::new(
+                    false,
+                    sim::Source::new_table(sim::TruthTableSource {
+                        inputs: sim::NodeAddr(0),
+                        output: 0,
+                        id: sim::TruthTableId(0),
+                    }),
+                ),
             )],
             inner_nodes: vec![],
         };
@@ -491,19 +511,22 @@ impl App {
             region_size: 2,
             name: "Not".into(),
             scene: None,
-            l_nodes: vec![("in".into(), sim::NodeAddr(0), sim::Source::new_none())],
+            l_nodes: vec![("in".into(), sim::NodeAddr(0), sim::Node::ZERO)],
             r_nodes: vec![(
                 "out".into(),
                 sim::NodeAddr(1),
-                sim::Source::new_table(sim::TruthTableSource {
-                    inputs: sim::NodeAddr(0),
-                    output: 0,
-                    id: sim::TruthTableId(1),
-                }),
+                sim::Node::new(
+                    false,
+                    sim::Source::new_table(sim::TruthTableSource {
+                        inputs: sim::NodeAddr(0),
+                        output: 0,
+                        id: sim::TruthTableId(1),
+                    }),
+                ),
             )],
             inner_nodes: vec![],
         };
-        app.chip_saves.extend([nand, not]);
+        app.chip_saves.extend([and, not]);
         app.last_fps_update = Some(SystemTime::now());
         app
     }
@@ -527,6 +550,8 @@ impl App {
         renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
         self.layouts_dirty = true;
         self.place_chips_pos = win_size.as_vec2() * 0.5;
+        self.scene
+            .init(Rect::from_min_size(Vec2::ZERO, win_size.as_vec2()));
 
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
@@ -584,13 +609,27 @@ impl App {
         }
 
         let style = self.ui_state.create_style();
+        if self.ui_state.triggered_save {
+            self.ui_state.triggered_save = false;
+            // self.scene.optimize(&mut self.sim);
+            let name = self.ui_state.chip_name.text.clone();
+            let save = create_chip_save(name, &self.sim, &self.scene);
+            self.chip_saves.push(save);
+            self.device_list_ui = DeviceListUi::new(&style, content_rect, &self.chip_saves);
+            self.ui_state.clear_scene = true;
+        }
+        if self.ui_state.clear_scene {
+            self.ui_state.clear_scene = false;
+            self.scene.clear();
+            self.sim.clear();
+            self.ui_state.open_menu = None;
+        }
         if self.layouts_dirty {
             self.options_menu = OptionsMenu::new(&style, content_rect);
             self.save_menu = SaveMenu::new(&style, content_rect);
             self.info_menu = InfoMenu::new(&style, content_rect);
             self.overlay_ui = OverlayUi::new(&style, content_rect);
             self.device_list_ui = DeviceListUi::new(&style, content_rect, &self.chip_saves);
-            log::info!("Generating UI layouts");
         }
         self.layouts_dirty = false;
         self.ui_state.frame_count += 1;
@@ -609,8 +648,31 @@ impl App {
         let mut painter = Painter::new(&style, input, &mut self.painter_model);
 
         // ---- Draw Scene ----
-        self.scene
+        let scene_rs = self
+            .scene
             .draw(&mut painter, &mut scene_hovered, &mut self.sim);
+        if self.ui_state.open_menu.is_none() {
+            if let Some(addr) = scene_rs.clicked_output {
+                self.start_wire = Some(addr);
+                log::info!("Started wire connection");
+            }
+            if let Some(addr) = scene_rs.clicked_input {
+                if let Some(src_addr) = self.start_wire {
+                    log::info!("Placing wire");
+                    let src = if addr == src_addr {
+                        Source::new_none()
+                    } else {
+                        Source::new_copy(src_addr)
+                    };
+                    self.sim.nodes[addr.0 as usize].set_source(src);
+                    self.start_wire = None;
+                } else {
+                    log::info!("Toggling input");
+                    let state = self.sim.nodes[addr.0 as usize].state();
+                    self.sim.nodes[addr.0 as usize].set_state(!state);
+                }
+            }
+        }
 
         // ---- Draw Chip Placement Previews ----
         let mut place_chips = false;
@@ -637,7 +699,7 @@ impl App {
 
             preview.pos.y += preview.size().y * 0.5;
             let bounds = preview.bounds();
-            preview.draw(None, &mut painter, &mut self.sim);
+            preview.draw(None, &mut painter, &mut self.sim, &mut Default::default());
             tmp_pos.y += preview.size().y + 5.0;
 
             if painter
@@ -729,6 +791,36 @@ impl App {
     }
 }
 
+pub fn create_chip_save(name: String, sim: &sim::Sim, scene: &scene::Scene) -> ChipSave {
+    let region_size = sim.next_region;
+    let l_nodes = scene
+        .left_nodes
+        .states
+        .iter()
+        .map(|addr| (String::from(""), *addr, sim.get_node(*addr)))
+        .collect();
+    let r_nodes = scene
+        .right_nodes
+        .states
+        .iter()
+        .map(|addr| (String::from(""), *addr, sim.get_node(*addr)))
+        .collect();
+    let mut inner_nodes = Vec::new();
+    for (_, device) in &scene.devices {
+        for addr in device.sim_nodes() {
+            inner_nodes.push((addr, sim.get_node(addr)));
+        }
+    }
+    ChipSave {
+        region_size,
+        name,
+        scene: None,
+        l_nodes,
+        r_nodes,
+        inner_nodes,
+    }
+}
+
 pub fn place_chip(
     sim: &mut sim::Sim,
     scene: &mut scene::Scene,
@@ -742,19 +834,26 @@ pub fn place_chip(
     let mut inner_nodes = vec![];
     let region = sim.alloc_region(save.region_size);
 
-    for (name, addr, source) in &save.l_nodes {
-        let addr = region.map(*addr);
-        sim.set_node_src(addr, region.map_src(*source));
-        l_nodes.push((addr, name.clone()));
+    fn io_ty(node: &sim::Node) -> save::IoType {
+        match node.source().ty() {
+            sim::SourceTy::None => save::IoType::Input,
+            _ => save::IoType::Output,
+        }
     }
-    for (name, addr, source) in &save.r_nodes {
+
+    for (name, addr, state) in &save.l_nodes {
         let addr = region.map(*addr);
-        sim.set_node_src(addr, region.map_src(*source));
-        r_nodes.push((addr, name.clone()));
+        sim.set_node(addr, region.map_node(*state));
+        l_nodes.push((addr, name.clone(), io_ty(state)));
     }
-    for (addr, source) in &save.inner_nodes {
+    for (name, addr, state) in &save.r_nodes {
         let addr = region.map(*addr);
-        sim.set_node_src(addr, region.map_src(*source));
+        sim.set_node(addr, region.map_node(*state));
+        r_nodes.push((addr, name.clone(), io_ty(state)));
+    }
+    for (addr, state) in &save.inner_nodes {
+        let addr = region.map(*addr);
+        sim.set_node(addr, region.map_node(*state));
         inner_nodes.push(addr);
     }
 
