@@ -30,6 +30,10 @@ fn main() {
             .map_err(|err| log::warn!("Failed to init system clipboard: {err:?}"))
             .ok(),
         text_input: None,
+
+        frame_count: 0,
+        last_fps_update: SystemTime::now(),
+        fps: 0,
     };
 
     _ = event_loop.run(move |event, event_loop| {
@@ -48,6 +52,10 @@ struct State {
     last_frame_time: SystemTime,
     clipboard: Option<clipboard::ClipboardContext>,
     text_input: Option<TextInputState>,
+
+    frame_count: u32,
+    last_fps_update: SystemTime,
+    fps: u32,
 }
 
 fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
@@ -80,10 +88,25 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 > (1000 / 60);
 
             if redraw {
+                // Update FPS
+                {
+                    ctx.frame_count += 1;
+                    if SystemTime::now()
+                        .duration_since(ctx.last_fps_update)
+                        .unwrap()
+                        .as_secs()
+                        >= 1
+                    {
+                        ctx.last_fps_update = SystemTime::now();
+                        ctx.fps = ctx.frame_count;
+                        ctx.frame_count = 0;
+                    }
+                }
+
                 ctx.last_frame_time = SystemTime::now();
                 match ctx
                     .app
-                    .draw_frame(&mut ctx.input, content_rect, &mut ctx.text_input)
+                    .draw_frame(&mut ctx.input, content_rect, &mut ctx.text_input, ctx.fps)
                 {
                     Err(err) => log::warn!("Failed to draw frame: {err:?}"),
                     Ok(_) => {}

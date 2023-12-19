@@ -1,14 +1,13 @@
 use crate::gpu::Gpu;
-use crate::graphics::ui::{Align, Align2, CycleState, Painter, Placer, Style, TextField};
+use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style, TextField};
 use crate::graphics::{Color, Model, Rect, Renderer, MAIN_ATLAS};
 use crate::input::{InputState, PtrButton, TextInputState};
-use crate::save::ChipSave;
+use crate::save::{ChipSave, Library};
 use crate::sim::{self, save, scene, NodeAddr, Sim, Source};
 use crate::Id;
 
 use glam::{UVec2, Vec2};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-use std::time::SystemTime;
 use wgpu::*;
 
 #[derive(Debug, Clone, Copy)]
@@ -81,28 +80,26 @@ impl CycleState for UiScale {
 }
 
 pub struct UiState {
-    frame_count: u32,
     ui_size: UiScale,
     ui_theme: UiTheme,
     chip_ty: ChipTy,
     chip_name: TextField,
     open_menu: Option<Menu>,
-    fps: u32,
     triggered_save: bool,
     clear_scene: bool,
+    debug_ui: bool,
 }
 impl Default for UiState {
     fn default() -> Self {
         Self {
-            frame_count: 0,
             ui_size: UiScale::One,
             ui_theme: UiTheme::Dark,
             chip_ty: ChipTy::Sequential,
             chip_name: TextField::default(),
             open_menu: None,
-            fps: 0,
             triggered_save: false,
             clear_scene: false,
+            debug_ui: false,
         }
     }
 }
@@ -117,6 +114,7 @@ impl UiState {
 
         rs.item_size *= scale;
         rs.text_size *= scale;
+        rs.lg_text_size *= scale;
         rs.seperator_w *= scale;
 
         if matches!(self.ui_theme, UiTheme::Light) {
@@ -145,295 +143,124 @@ impl UiState {
     }
 }
 
-#[derive(Default)]
-pub struct OptionsMenu {
-    background: Rect,
-    title: Rect,
-    title_sep: Rect,
-    info: Rect,
-    ui_size: Rect,
-    ui_theme: Rect,
-    clear_scene: Rect,
-    done: Rect,
-}
-impl OptionsMenu {
-    fn new(style: &Style, view_bounds: Rect) -> Self {
-        let mut placer = Placer::new(
-            &style,
-            view_bounds.center(),
-            Align2::CENTER,
-            Align2::CENTER,
-            Vec2::Y,
-        );
-        let mut rs: Self = Self::default();
-        while placer.start() {
-            rs.background = placer.bounds;
-            rs.title = placer.next();
-            rs.title_sep = placer.seperator();
-            rs.info = placer.next();
-            rs.ui_size = placer.next();
-            rs.ui_theme = placer.next();
-            rs.clear_scene = placer.next();
-            rs.done = placer.next();
-        }
-        rs
-    }
-    fn show(&self, painter: &mut Painter, state: &mut UiState, rebuild: &mut bool) {
-        painter.menu_background(self.background);
-        painter.text(self.title, "Options");
-        painter.seperator(self.title_sep);
-        if painter.button(self.info, "Info").triggered {
-            state.open_menu = Some(Menu::Info);
-        }
-        painter.cycle(self.ui_size, &mut state.ui_size, rebuild);
-        painter.cycle(self.ui_theme, &mut state.ui_theme, &mut false);
-        if painter.button(self.clear_scene, "Clear Scene").triggered {
-            state.clear_scene = true;
-        }
-        if painter.button(self.done, "Done").triggered {
-            state.open_menu = None;
-        }
+pub fn show_info_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
+    let mut p = MenuPainter::new(bounds, p);
+    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
+    p.text_lg(None, "Info");
+    p.seperator();
+
+    p.text(None, "Developer: Mason Feurer");
+    p.text(None, "Version: 0.0.1");
+    let platform = format!(
+        "Platform: {} ({})",
+        std::env::consts::OS,
+        std::env::consts::FAMILY
+    );
+    p.text(None, platform);
+    p.text(None, format!("Architecture: {}", std::env::consts::ARCH));
+
+    if p.button(None, "Done").clicked {
+        state.open_menu = None;
     }
 }
 
-#[derive(Default)]
-pub struct OverlayUi {
-    background: Rect,
-    options: Rect,
-    save: Rect,
-    fps: Rect,
-}
-impl OverlayUi {
-    fn new(style: &Style, view_bounds: Rect) -> Self {
-        let mut style = style.clone();
-        style.text_align = Align2::MIN;
-        style.item_size.x *= 0.6;
+pub fn show_options_menu(
+    bounds: &mut Rect,
+    p: &mut Painter,
+    screen: Rect,
+    state: &mut UiState,
+    layouts_dirty: &mut bool,
+) {
+    let mut p = MenuPainter::new(bounds, p);
+    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
-        let mut placer = Placer::new(
-            &style,
-            view_bounds.min,
-            Align2::TOP_LEFT,
-            Align2::MIN,
-            Vec2::X,
-        );
-        Self {
-            options: placer.image_button(),
-            save: placer.image_button(),
-            fps: placer.next(),
-            background: placer.bounds,
-        }
+    p.text_lg(None, "Options");
+    p.seperator();
+    if p.button(None, "Info").clicked {
+        state.open_menu = Some(Menu::Info);
     }
-
-    fn show(&self, painter: &mut Painter, state: &mut UiState) {
-        painter.menu_background(self.background);
-        if painter
-            .image_button(self.options, &MAIN_ATLAS["options_icon"])
-            .triggered
-        {
-            state.open_menu = Some(Menu::Options);
-        }
-        if painter
-            .image_button(self.save, &MAIN_ATLAS["add_icon"])
-            .triggered
-        {
-            state.open_menu = Some(Menu::Save);
-        }
-        painter.text(self.fps, format!("fps: {}", state.fps));
+    p.cycle(None, &mut state.ui_size, layouts_dirty);
+    p.cycle(None, &mut state.ui_theme, &mut false);
+    p.toggle(None, "Debug UI", &mut state.debug_ui, &mut false);
+    if p.button(None, "Clear The Scene").clicked {
+        state.clear_scene = true;
+    }
+    if p.button(None, "Done").clicked {
+        state.open_menu = None;
     }
 }
 
-#[derive(Default)]
-pub struct SaveMenu {
-    background: Rect,
-    title: Rect,
-    title_sep: Rect,
-    name: Rect,
-    chip_ty: Rect,
-    cancel: Rect,
-    done: Rect,
-}
-impl SaveMenu {
-    fn new(style: &Style, view_bounds: Rect) -> Self {
-        let mut placer = Placer::new(
-            &style,
-            view_bounds.center(),
-            Align2::CENTER,
-            Align2::CENTER,
-            Vec2::Y,
-        );
-        let mut rs = Self::default();
-        while placer.start() {
-            rs.background = placer.bounds;
-            rs.title = placer.next();
-            rs.title_sep = placer.seperator();
-            rs.name = placer.next();
-            rs.chip_ty = placer.next();
-            rs.cancel = placer.next();
-            rs.done = placer.next();
-        }
-        rs
-    }
+pub fn show_save_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
+    let mut p = MenuPainter::new(bounds, p);
+    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
-    fn show(&self, painter: &mut Painter, state: &mut UiState) {
-        painter.menu_background(self.background);
-        painter.text(self.title, "Save to Chip");
-        painter.seperator(self.title_sep);
-        painter.text_edit(self.name, "Name", &mut state.chip_name);
-        painter.cycle(self.chip_ty, &mut state.chip_ty, &mut false);
-        if painter.button(self.cancel, "Cancel").triggered {
-            state.open_menu = None;
-        }
-        if painter.button(self.done, "Done").triggered {
-            state.triggered_save = true;
-        }
+    p.text_lg(None, "Save to Chip");
+    p.seperator();
+    p.text_edit(None, "Name", &mut state.chip_name);
+    p.cycle(None, &mut state.chip_ty, &mut false);
+    if p.button(None, "Cancel").clicked {
+        state.open_menu = None;
+    }
+    if p.button(None, "Done").clicked {
+        state.triggered_save = true;
     }
 }
 
-#[derive(Default)]
-pub struct InfoMenu {
-    background: Rect,
-    title: Rect,
-    title_sep: Rect,
-    lines: [Rect; 4],
-    done: Rect,
-}
-impl InfoMenu {
-    fn new(style: &Style, view_bounds: Rect) -> Self {
-        let mut placer = Placer::new(
-            &style,
-            view_bounds.center(),
-            Align2::CENTER,
-            Align2::CENTER,
-            Vec2::Y,
-        );
-        let mut rs = Self::default();
-        while placer.start() {
-            rs.background = placer.bounds;
-            rs.title = placer.next();
-            rs.title_sep = placer.seperator();
-            rs.lines = std::array::from_fn(|_| placer.next());
-            rs.done = placer.next();
-        }
-        rs
+pub fn show_overlay(
+    bounds: &mut Rect,
+    p: &mut Painter,
+    screen: Rect,
+    fps: u32,
+    state: &mut UiState,
+) {
+    let mut p = MenuPainter::new(bounds, p);
+    p.start_placing(screen.min, Align2::MIN, Align2::MIN, Vec2::X);
+
+    if p.image_button(None, &MAIN_ATLAS["options_icon"]).clicked {
+        state.open_menu = Some(Menu::Options);
     }
-
-    fn show(&self, painter: &mut Painter, state: &mut UiState) {
-        painter.menu_background(self.background);
-        painter.text(self.title, "Info");
-        painter.seperator(self.title_sep);
-
-        painter.text(self.lines[0], "Developer: Mason Feurer");
-        painter.text(self.lines[1], "Version: 0.0.1");
-        painter.text(
-            self.lines[2],
-            format!(
-                "Platform: {} ({})",
-                std::env::consts::OS,
-                std::env::consts::FAMILY
-            ),
-        );
-        painter.text(
-            self.lines[3],
-            format!("Architecture: {}", std::env::consts::ARCH),
-        );
-
-        if painter.button(self.done, "Done").triggered {
-            state.open_menu = Some(Menu::Options);
-        }
+    if p.image_button(None, &MAIN_ATLAS["add_icon"]).clicked {
+        state.open_menu = Some(Menu::Save);
     }
+    p.text(None, format!("fps: {fps}"));
 }
 
-#[derive(Default)]
-pub struct PlaceChipsUi {
-    background: Rect,
-    confirm: Rect,
-    cancel: Rect,
-}
-impl PlaceChipsUi {
-    fn new(style: &Style, bottom_center: Vec2) -> Self {
-        let mut style = style.clone();
-        style.item_align = Align::Min;
+pub fn show_device_list(
+    bounds: &mut Rect,
+    p: &mut Painter,
+    screen: Rect,
+    chips: &[save::ChipSave],
+    hold_chip: &mut Option<usize>,
+) {
+    let mut p = MenuPainter::new(bounds, p);
+    let old_style = p.style().clone();
+    p.style.item_size.x *= 0.5;
 
-        let mut placer = Placer::new(
-            &style,
-            bottom_center,
-            Align2::BOTTOM_CENTER,
-            Align2::MIN,
-            Vec2::X,
-        );
-        let mut rs = Self::default();
-        while placer.start() {
-            rs.background = placer.bounds;
-            rs.confirm = placer.image_button();
-            rs.cancel = placer.image_button();
-        }
-        rs
-    }
+    p.start_placing(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::Y);
 
-    fn show(&self, painter: &mut Painter, place_chips: &mut bool, cancel_place_chips: &mut bool) {
-        painter.menu_background(self.background);
-        if painter
-            .image_button(self.confirm, &MAIN_ATLAS["confirm_icon"])
-            .triggered
-        {
-            *place_chips = true;
-        }
-        if painter
-            .image_button(self.cancel, &MAIN_ATLAS["cancel_icon"])
-            .triggered
-        {
-            *cancel_place_chips = true;
+    for (idx, chip) in chips.iter().enumerate() {
+        if p.button(None, &chip.name).clicked {
+            *hold_chip = Some(idx);
         }
     }
+    p.style = old_style;
 }
 
-#[derive(Default)]
-pub struct DeviceListUi {
-    background: Rect,
-    title: Rect,
-    title_sep: Rect,
-    chips: Vec<Rect>,
-}
-impl DeviceListUi {
-    fn new(style: &Style, view_bounds: Rect, chips: &[save::ChipSave]) -> Self {
-        let mut style = style.clone();
-        style.item_align = Align::Max;
-        style.item_size.x *= 0.8;
+pub fn show_device_preview_header(
+    bounds: &mut Rect,
+    p: &mut Painter,
+    pos: Vec2,
+    confirm: &mut bool,
+    cancel: &mut bool,
+) {
+    let mut p = MenuPainter::new(bounds, p);
+    p.start_placing(pos, Align2::BOTTOM_CENTER, Align2::MIN, Vec2::X);
 
-        let mut placer = Placer::new(
-            &style,
-            view_bounds.tr(),
-            Align2::TOP_RIGHT,
-            Align2::MIN,
-            Vec2::Y,
-        );
-        let mut rs = Self::default();
-        while placer.start() {
-            rs.background = placer.bounds;
-            rs.title = placer.next();
-            rs.title_sep = placer.seperator();
-            rs.chips.clear();
-            for _ in chips {
-                rs.chips.push(placer.next());
-            }
-        }
-        rs
+    if p.image_button(None, &MAIN_ATLAS["confirm_icon"]).clicked {
+        *confirm = true;
     }
-
-    fn show(
-        &self,
-        painter: &mut Painter,
-        chips: &[save::ChipSave],
-        preview_chip: &mut Option<usize>,
-    ) {
-        painter.menu_background(self.background);
-        painter.text(self.title, "Devices");
-        painter.seperator(self.title_sep);
-        for (idx, chip) in self.chips.iter().copied().enumerate() {
-            if painter.button(chip, &chips[idx].name).triggered {
-                *preview_chip = Some(idx);
-            }
-        }
+    if p.image_button(None, &MAIN_ATLAS["cancel_icon"]).clicked {
+        *cancel = true;
     }
 }
 
@@ -452,82 +279,24 @@ pub struct App {
 
     pub scene: scene::Scene,
 
-    pub options_menu: OptionsMenu,
-    pub save_menu: SaveMenu,
-    pub info_menu: InfoMenu,
-    pub overlay_ui: OverlayUi,
-    pub device_list_ui: DeviceListUi,
-    pub place_chips_ui: PlaceChipsUi,
+    pub options_menu: Rect,
+    pub info_menu: Rect,
+    pub save_menu: Rect,
+    pub overlay_ui: Rect,
+    pub device_list_ui: Rect,
+    pub place_chips_ui: Rect,
 
-    pub chip_saves: Vec<save::ChipSave>,
+    pub library: Library,
     pub chips_in_hand: Vec<u32>,
     pub ui_state: UiState,
     pub place_chips_pos: Vec2,
-    pub last_fps_update: Option<SystemTime>,
-    pub frame_count: u32,
-    pub painter_model: Model,
     pub layouts_dirty: bool,
     pub start_wire: Option<NodeAddr>,
 }
 impl App {
     pub fn new() -> Self {
         let mut app = Self::default();
-        let and_table = sim::TruthTable {
-            num_inputs: 2,
-            num_outputs: 1,
-            name: "And".into(),
-            map: Box::new([0, 0, 0, 1]),
-        };
-        let not_table = sim::TruthTable {
-            num_inputs: 1,
-            num_outputs: 1,
-            name: "Not".into(),
-            map: Box::new([1, 0]),
-        };
-        app.sim.tables = vec![and_table, not_table];
-        let and = save::ChipSave {
-            region_size: 3,
-            name: "And".into(),
-            scene: None,
-            l_nodes: vec![
-                ("a".into(), sim::NodeAddr(0), sim::Node::ZERO),
-                ("b".into(), sim::NodeAddr(1), sim::Node::ZERO),
-            ],
-            r_nodes: vec![(
-                "out".into(),
-                sim::NodeAddr(2),
-                sim::Node::new(
-                    false,
-                    sim::Source::new_table(sim::TruthTableSource {
-                        inputs: sim::NodeAddr(0),
-                        output: 0,
-                        id: sim::TruthTableId(0),
-                    }),
-                ),
-            )],
-            inner_nodes: vec![],
-        };
-        let not = save::ChipSave {
-            region_size: 2,
-            name: "Not".into(),
-            scene: None,
-            l_nodes: vec![("in".into(), sim::NodeAddr(0), sim::Node::ZERO)],
-            r_nodes: vec![(
-                "out".into(),
-                sim::NodeAddr(1),
-                sim::Node::new(
-                    false,
-                    sim::Source::new_table(sim::TruthTableSource {
-                        inputs: sim::NodeAddr(0),
-                        output: 0,
-                        id: sim::TruthTableId(1),
-                    }),
-                ),
-            )],
-            inner_nodes: vec![],
-        };
-        app.chip_saves.extend([and, not]);
-        app.last_fps_update = Some(SystemTime::now());
+        app.sim.tables = app.library.tables.clone();
         app
     }
 
@@ -560,7 +329,7 @@ impl App {
     pub fn size(&self) -> UVec2 {
         self.gpu
             .as_ref()
-            .map(|gpu| gpu.surface_size())
+            .map(Gpu::surface_size)
             .unwrap_or(UVec2::ZERO)
     }
 
@@ -582,6 +351,7 @@ impl App {
         input: &mut InputState,
         content_rect: Rect,
         text_input: &mut Option<TextInputState>,
+        fps: u32,
     ) -> Result<(), String> {
         let gpu = self.gpu.as_ref().ok_or(format!("Missing Gpu instance"))?;
         let renderer = self
@@ -589,33 +359,12 @@ impl App {
             .as_mut()
             .ok_or(format!("Missing Renderer instance"))?;
 
-        // Update FPS counter:
-        'f: {
-            let Some(last_update) = &mut self.last_fps_update else {
-                break 'f;
-            };
-
-            self.frame_count += 1;
-            if SystemTime::now()
-                .duration_since(*last_update)
-                .unwrap()
-                .as_secs()
-                >= 1
-            {
-                *last_update = SystemTime::now();
-                self.ui_state.fps = self.frame_count;
-                self.frame_count = 0;
-            }
-        }
-
-        let style = self.ui_state.create_style();
         if self.ui_state.triggered_save {
             self.ui_state.triggered_save = false;
             // self.scene.optimize(&mut self.sim);
             let name = self.ui_state.chip_name.text.clone();
             let save = create_chip_save(name, &self.sim, &self.scene);
-            self.chip_saves.push(save);
-            self.device_list_ui = DeviceListUi::new(&style, content_rect, &self.chip_saves);
+            self.library.add(&[save]);
             self.ui_state.clear_scene = true;
         }
         if self.ui_state.clear_scene {
@@ -625,52 +374,51 @@ impl App {
             self.ui_state.open_menu = None;
         }
         if self.layouts_dirty {
-            self.options_menu = OptionsMenu::new(&style, content_rect);
-            self.save_menu = SaveMenu::new(&style, content_rect);
-            self.info_menu = InfoMenu::new(&style, content_rect);
-            self.overlay_ui = OverlayUi::new(&style, content_rect);
-            self.device_list_ui = DeviceListUi::new(&style, content_rect, &self.chip_saves);
+            self.options_menu = Default::default();
+            self.info_menu = Default::default();
+            self.save_menu = Default::default();
+            self.overlay_ui = Default::default();
+            self.device_list_ui = Default::default();
+            self.place_chips_ui = Default::default();
         }
         self.layouts_dirty = false;
-        self.ui_state.frame_count += 1;
 
         let show_place_devices_ui = self.chips_in_hand.len() > 0;
 
-        let mut scene_hovered = !input.area_hovered(self.device_list_ui.background)
-            && !input.area_hovered(self.overlay_ui.background)
+        let mut scene_hovered = !input.area_hovered(self.device_list_ui)
+            && !input.area_hovered(self.overlay_ui)
             && self.ui_state.open_menu.is_none()
-            && !(input.area_hovered(self.place_chips_ui.background) && show_place_devices_ui);
+            && !(input.area_hovered(self.place_chips_ui) && show_place_devices_ui);
 
         self.sim.update();
 
-        // ----------------- Start Drawing --------------------
-        self.painter_model.clear();
-        let mut painter = Painter::new(&style, input, &mut self.painter_model);
+        let mut model = Model::default();
+        let mut painter = Painter::new(self.ui_state.create_style(), input, &mut model);
+        painter.debug = self.ui_state.debug_ui;
 
         // ---- Draw Scene ----
+        painter.set_transform(self.scene.transform);
         let scene_rs = self
             .scene
             .draw(&mut painter, &mut scene_hovered, &mut self.sim);
-        if self.ui_state.open_menu.is_none() {
-            if let Some(addr) = scene_rs.clicked_output {
-                self.start_wire = Some(addr);
-                log::info!("Started wire connection");
-            }
-            if let Some(addr) = scene_rs.clicked_input {
-                if let Some(src_addr) = self.start_wire {
-                    log::info!("Placing wire");
-                    let src = if addr == src_addr {
-                        Source::new_none()
-                    } else {
-                        Source::new_copy(src_addr)
-                    };
-                    self.sim.nodes[addr.0 as usize].set_source(src);
-                    self.start_wire = None;
+        if let Some(addr) = scene_rs.clicked_output {
+            self.start_wire = Some(addr);
+            log::info!("Started wire connection");
+        }
+        if let Some(addr) = scene_rs.clicked_input {
+            if let Some(src_addr) = self.start_wire {
+                log::info!("Placing wire");
+                let src = if addr == src_addr {
+                    Source::new_none()
                 } else {
-                    log::info!("Toggling input");
-                    let state = self.sim.nodes[addr.0 as usize].state();
-                    self.sim.nodes[addr.0 as usize].set_state(!state);
-                }
+                    Source::new_copy(src_addr)
+                };
+                self.sim.nodes[addr.0 as usize].set_source(src);
+                self.start_wire = None;
+            } else {
+                log::info!("Toggling input");
+                let state = self.sim.nodes[addr.0 as usize].state();
+                self.sim.nodes[addr.0 as usize].set_state(!state);
             }
         }
 
@@ -679,49 +427,48 @@ impl App {
 
         // Draw Confirm/Cancel UI
         if show_place_devices_ui {
-            let pos = self.scene.transform.transform().apply(self.place_chips_pos);
-            self.place_chips_ui = PlaceChipsUi::new(&style, pos);
-            let mut cancel_place_chips = false;
-            self.place_chips_ui
-                .show(&mut painter, &mut place_chips, &mut cancel_place_chips);
-            if cancel_place_chips {
+            let pos = self.scene.transform * self.place_chips_pos;
+
+            let mut cancel = false;
+            show_device_preview_header(
+                &mut self.place_chips_ui,
+                &mut painter,
+                pos,
+                &mut place_chips,
+                &mut cancel,
+            );
+            if cancel {
                 self.chips_in_hand.clear();
             }
         }
 
         // Draw Chips
-        painter.set_transform(self.scene.transform.transform());
         let mut tmp_pos = self.place_chips_pos;
         for chip_idx in self.chips_in_hand.iter().copied() {
-            let chip = &self.chip_saves[chip_idx as usize];
+            let chip = &self.library.chips[chip_idx as usize];
             use scene::{DeviceImpl, Rotation};
             let mut preview = chip.preview(tmp_pos, Rotation::Rot0);
 
             preview.pos.y += preview.size().y * 0.5;
             let bounds = preview.bounds();
+            painter.set_transform(self.scene.transform);
             preview.draw(None, &mut painter, &mut self.sim, &mut Default::default());
             tmp_pos.y += preview.size().y + 5.0;
 
-            if painter
-                .input
-                .area_hovered(self.scene.transform.transform().apply2(bounds))
-            {
+            if painter.input.area_hovered(self.scene.transform * bounds) {
                 scene_hovered = false;
             }
 
             painter.input.update_drag(
                 Id::new("place_chips_ui"),
-                self.scene.transform.transform().apply2(bounds),
+                self.scene.transform * bounds,
                 self.place_chips_pos,
                 PtrButton::LEFT,
             );
             if let Some(drag) = painter.input.get_drag_full(Id::new("place_chips_ui")) {
-                let offset = drag.press_pos - self.scene.transform.transform().apply(drag.anchor);
-                self.place_chips_pos = self
-                    .scene
-                    .transform
-                    .inv_transform()
-                    .apply(painter.input.ptr_pos() - offset);
+                let offset = drag.press_pos - self.scene.transform * drag.anchor;
+                self.place_chips_pos =
+                    self.scene.transform.inv() * (painter.input.ptr_pos() - offset);
             }
 
             if place_chips {
@@ -735,7 +482,6 @@ impl App {
                 );
             }
         }
-        painter.reset_transform();
         if place_chips {
             self.chips_in_hand.clear();
         }
@@ -750,29 +496,57 @@ impl App {
             self.scene.transform.offset = new_offset;
         }
         if let Some((anchor, delta)) = painter.input.zoom_delta() {
-            self.scene.transform.zoom(anchor, delta * 0.1);
+            self.scene.transform.zoom(anchor, delta * 0.1, 0.1..=100.0);
         }
 
         // ---- Draw UI & Menus ----
         match self.ui_state.open_menu {
             Some(Menu::Options) => {
-                self.options_menu
-                    .show(&mut painter, &mut self.ui_state, &mut self.layouts_dirty)
+                show_options_menu(
+                    &mut self.options_menu,
+                    &mut painter,
+                    content_rect,
+                    &mut self.ui_state,
+                    &mut self.layouts_dirty,
+                );
             }
-            Some(Menu::Info) => self.info_menu.show(&mut painter, &mut self.ui_state),
-            Some(Menu::Save) => self.save_menu.show(&mut painter, &mut self.ui_state),
+            Some(Menu::Info) => {
+                show_info_menu(
+                    &mut self.info_menu,
+                    &mut painter,
+                    content_rect,
+                    &mut self.ui_state,
+                );
+            }
+            Some(Menu::Save) => {
+                show_save_menu(
+                    &mut self.save_menu,
+                    &mut painter,
+                    content_rect,
+                    &mut self.ui_state,
+                );
+            }
             None => {
-                self.overlay_ui.show(&mut painter, &mut self.ui_state);
+                show_overlay(
+                    &mut self.overlay_ui,
+                    &mut painter,
+                    content_rect,
+                    fps,
+                    &mut self.ui_state,
+                );
+
                 let mut hold_chip = None;
-                self.device_list_ui
-                    .show(&mut painter, &self.chip_saves, &mut hold_chip);
+                show_device_list(
+                    &mut self.device_list_ui,
+                    &mut painter,
+                    content_rect,
+                    &self.library.chips,
+                    &mut hold_chip,
+                );
+
                 if let Some(idx) = hold_chip {
                     if self.chips_in_hand.is_empty() {
-                        self.place_chips_pos = self
-                            .scene
-                            .transform
-                            .inv_transform()
-                            .apply(content_rect.center());
+                        self.place_chips_pos = self.scene.transform.inv() * content_rect.center();
                     }
                     self.chips_in_hand.push(idx as u32);
                 }
@@ -780,12 +554,13 @@ impl App {
         };
 
         // ---- Finish Drawing ----
-        let model = painter.upload(gpu);
-        *text_input = painter.text_input.clone();
-
-        let models = std::iter::once(&model);
+        *text_input = painter.output.text_input.clone();
         let rs = renderer
-            .render(gpu, Some(style.background), models)
+            .render(
+                gpu,
+                Some(painter.style().background),
+                [&model.upload(&gpu.device)],
+            )
             .map_err(|_| format!("Failed to render models"));
         rs
     }

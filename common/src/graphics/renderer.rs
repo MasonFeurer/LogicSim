@@ -239,7 +239,7 @@ impl Renderer {
             };
             (LoadOp::Clear(color), true)
         } else {
-            (LoadOp::Load, false)
+            (LoadOp::Load, true)
         };
 
         let mut pass = cmd_encoder.begin_render_pass(&RenderPassDescriptor {

@@ -10,6 +10,7 @@ pub use renderer::*;
 
 use crate::sim::NodeAddr;
 use glam::{vec2, vec4, Vec2, Vec4};
+use std::fmt;
 
 #[derive(Clone, Copy, Default)]
 pub struct Color(pub u32);
@@ -111,10 +112,18 @@ impl<C> Stroke<C> {
     }
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct Rect {
     pub min: Vec2,
     pub max: Vec2,
+}
+impl fmt::Debug for Rect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Rect")
+            .field(&self.min)
+            .field(&self.max)
+            .finish()
+    }
 }
 impl Rect {
     pub const ZERO: Self = Self {
@@ -237,23 +246,6 @@ pub struct Transform {
     pub offset: Vec2,
     pub scale: f32,
 }
-impl Transform {
-    #[inline(always)]
-    pub fn apply(self, v: Vec2) -> Vec2 {
-        v * self.scale + self.offset
-    }
-
-    #[inline(always)]
-    pub fn apply2(self, r: Rect) -> Rect {
-        let (min, max) = (self.apply(r.min), self.apply(r.max));
-        Rect { min, max }
-    }
-
-    #[inline(always)]
-    pub fn from_offset(offset: Vec2) -> Self {
-        Self { offset, scale: 1.0 }
-    }
-}
 impl Default for Transform {
     fn default() -> Self {
         Self {
@@ -262,49 +254,47 @@ impl Default for Transform {
         }
     }
 }
-
-#[derive(Clone, Debug)]
-pub struct PanZoomTransform {
-    /// Screen coordinates of the origin in world space
-    pub offset: Vec2,
-    pub scale: f32,
-    pub min_scale: f32,
-    pub max_scale: f32,
-}
-impl Default for PanZoomTransform {
-    fn default() -> Self {
-        Self {
-            offset: Vec2::ZERO,
-            scale: 1.0,
-            min_scale: 0.1,
-            max_scale: 100.0,
-        }
+impl std::ops::Mul<Vec2> for Transform {
+    type Output = Vec2;
+    #[inline(always)]
+    fn mul(self, v: Vec2) -> Vec2 {
+        v * self.scale + self.offset
     }
 }
-impl PanZoomTransform {
-    pub fn zoom(&mut self, pos: Vec2, delta: f32) {
+impl std::ops::Mul<Rect> for Transform {
+    type Output = Rect;
+    #[inline(always)]
+    fn mul(self, r: Rect) -> Rect {
+        let (min, max) = (self * r.min, self * r.max);
+        Rect { min, max }
+    }
+}
+impl Transform {
+    #[inline(always)]
+    pub fn from_offset(offset: Vec2) -> Self {
+        Self { offset, scale: 1.0 }
+    }
+
+    #[inline(always)]
+    pub fn inv(self) -> Self {
+        let scale = 1.0 / self.scale;
+        let offset = vec2(-self.offset.x / self.scale, -self.offset.y / self.scale);
+        Self { scale, offset }
+    }
+
+    pub fn zoom(&mut self, pos: Vec2, delta: f32, range: std::ops::RangeInclusive<f32>) {
         if delta == 0.0 {
             return;
         }
         let xs = (pos.x - self.offset.x) / self.scale;
         let ys = (pos.y - self.offset.y) / self.scale;
-        self.scale = (self.scale + delta).clamp(self.min_scale, self.max_scale);
+        self.scale = (self.scale + delta).clamp(*range.start(), *range.end());
 
         self.offset.x = pos.x - xs * self.scale;
         self.offset.y = pos.y - ys * self.scale;
     }
-    pub fn pan(&mut self, offset: Vec2) {
-        self.offset += offset;
-    }
 
-    pub fn transform(&self) -> Transform {
-        let scale = self.scale;
-        let offset = self.offset;
-        Transform { scale, offset }
-    }
-    pub fn inv_transform(&self) -> Transform {
-        let scale = 1.0 / self.scale;
-        let offset = vec2(-self.offset.x / self.scale, -self.offset.y / self.scale);
-        Transform { scale, offset }
+    pub fn translate(&mut self, offset: Vec2) {
+        self.offset += offset;
     }
 }

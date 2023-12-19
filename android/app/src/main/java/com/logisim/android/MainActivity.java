@@ -14,7 +14,6 @@ import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
-import android.widget.EditText;
 
 public class MainActivity extends GameActivity {
     static {
@@ -75,9 +74,6 @@ public class MainActivity extends GameActivity {
         WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
         hideSystemUI();
         createInsetsListener();
-
-        final EditText field = new EditText(this);
-        setContentView(field);
         super.onCreate(savedInstanceState);
     }
 

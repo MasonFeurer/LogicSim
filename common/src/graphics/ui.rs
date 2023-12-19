@@ -1,11 +1,12 @@
-use super::{Color, ColorSrc, GpuModel, Image, Model, Rect, Transform, MAIN_ATLAS};
-use crate::gpu::Gpu;
+use super::{Color, ColorSrc, Image, Model, Rect, Transform, MAIN_ATLAS};
 use crate::input::{InputState, Key, PtrButton, TextInputState};
+use crate::Id;
 use glam::{vec2, Vec2};
 
 #[derive(Clone)]
 pub struct Style {
     pub text_size: f32,
+    pub lg_text_size: f32,
     pub text_color: ColorSrc,
     pub background: Color,
     pub menu_background: ColorSrc,
@@ -23,6 +24,7 @@ impl Default for Style {
     fn default() -> Self {
         Self {
             text_size: 30.0,
+            lg_text_size: 50.0,
             text_color: Color::shade(255).into(),
             background: Color::shade(4),
             menu_background: Color::shade(10).into(),
@@ -62,14 +64,15 @@ impl Dir {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub enum Align {
+    #[default]
     Min,
     Center,
     Max,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct Align2 {
     pub x: Align,
     pub y: Align,
@@ -144,43 +147,204 @@ pub struct Interaction {
     pub hovered: bool,
 }
 
-pub struct Painter<'a, 'b> {
-    pub transform: Transform,
-    pub style: &'a Style,
-    pub input: &'a mut InputState,
+#[derive(Default, Clone)]
+pub struct Placer2 {
+    pub anchor: Vec2,
+    pub align_to_anchor: Align2,
+    pub item_align: Align2,
+    pub bounds: Rect,
+    pub margin: Vec2,
+    pub spacing: Vec2,
+    pub cursor: Vec2,
+    pub dir: Vec2,
+    pub dirty: bool,
+}
+impl Placer2 {
+    pub fn new(
+        margin: Vec2,
+        spacing: Vec2,
+        anchor: Vec2,
+        align_to_anchor: Align2,
+        item_align: Align2,
+        dir: Vec2,
+        size: Vec2,
+    ) -> Self {
+        let bounds = Self::create_bounds(anchor, align_to_anchor, size);
+        Self {
+            margin,
+            spacing,
+            anchor,
+            align_to_anchor,
+            item_align,
+            bounds,
+            dir,
+
+            cursor: Self::create_start_pos(margin, item_align, bounds),
+            dirty: false,
+        }
+    }
+}
+impl Placer2 {
+    fn create_bounds(anchor: Vec2, align: Align2, size: Vec2) -> Rect {
+        let x = match align.x {
+            Align::Min => anchor.x,
+            Align::Center => anchor.x - size.x * 0.5,
+            Align::Max => anchor.x - size.x,
+        };
+        let y = match align.y {
+            Align::Min => anchor.y,
+            Align::Center => anchor.y - size.y * 0.5,
+            Align::Max => anchor.y - size.y,
+        };
+        Rect::from_min_size(vec2(x, y), size)
+    }
+    fn create_start_pos(margin: Vec2, item_align: Align2, bounds: Rect) -> Vec2 {
+        let ui_bounds = bounds.shrink(margin);
+        match item_align.x {
+            Align::Min => vec2(ui_bounds.min.x, ui_bounds.min.y),
+            Align::Max => vec2(ui_bounds.max.x, ui_bounds.min.y),
+            Align::Center => ui_bounds.min + vec2(ui_bounds.width() * 0.5, 0.0),
+        }
+    }
+
+    pub fn start(&mut self) -> bool {
+        if self.dirty {
+            self.dirty = false;
+            self.bounds =
+                Self::create_bounds(self.anchor, self.align_to_anchor, self.bounds.size());
+            self.cursor = Self::create_start_pos(self.margin, self.item_align, self.bounds);
+            return true;
+        }
+        false
+    }
+
+    fn prepare_for_size(&mut self, size: Vec2) {
+        let max = self.bounds.min + self.margin * 2.0 + size;
+        if !self.bounds.contains(max) {
+            self.bounds.expand_to_contain(max);
+            self.dirty = true;
+        }
+    }
+
+    fn rect_result(&mut self, rect: Rect) -> Rect {
+        let max = rect.max + self.margin;
+        if !self.bounds.contains(max) {
+            self.dirty = true;
+        }
+        self.bounds.expand_to_contain(max);
+        rect
+    }
+
+    pub fn next(&mut self, size: Vec2) -> Rect {
+        let anchor = self.cursor;
+        self.prepare_for_size(size);
+        let min = match self.item_align.x {
+            Align::Min => anchor,
+            Align::Center => vec2(anchor.x - size.x * 0.5, anchor.y),
+            Align::Max => vec2(anchor.x - size.x, anchor.y),
+        };
+        self.cursor += self.dir * (size + self.spacing);
+        self.rect_result(Rect::from_min_size(min, size))
+    }
+}
+
+#[derive(Default, Clone)]
+pub struct PainterOutput {
+    pub hovered: Option<Id>,
     pub text_input: Option<TextInputState>,
-    pub model: &'b mut Model,
+    pub drag_input: bool,
+}
+
+pub struct MenuPainter<'i, 'm, 'x, 'y> {
+    bounds: &'x mut Rect,
+    painter: &'y mut Painter<'i, 'm>,
+}
+impl<'i, 'm, 'x, 'y> MenuPainter<'i, 'm, 'x, 'y> {
+    pub fn new(bounds: &'x mut Rect, painter: &'y mut Painter<'i, 'm>) -> Self {
+        painter.set_transform(Transform::default());
+        painter.set_bounds(*bounds);
+        painter.show_background();
+        Self { bounds, painter }
+    }
+}
+impl<'i, 'm, 'x, 'y> std::ops::Drop for MenuPainter<'i, 'm, 'x, 'y> {
+    fn drop(&mut self) {
+        *self.bounds = self.painter.bounds();
+    }
+}
+impl<'i, 'm, 'x, 'y> std::ops::Deref for MenuPainter<'i, 'm, 'x, 'y> {
+    type Target = Painter<'i, 'm>;
+    fn deref(&self) -> &Self::Target {
+        &self.painter
+    }
+}
+impl<'i, 'm, 'x, 'y> std::ops::DerefMut for MenuPainter<'i, 'm, 'x, 'y> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.painter
+    }
+}
+
+pub struct Painter<'i, 'm> {
+    pub transform: Transform,
+    pub placer: Placer2,
+    pub style: Style,
+    pub input: &'i mut InputState,
+    pub model: &'m mut Model,
+    pub output: PainterOutput,
     pub debug: bool,
 }
-impl<'a, 'b> Painter<'a, 'b> {
-    pub fn new(style: &'a Style, input: &'a mut InputState, model: &'b mut Model) -> Self {
+impl<'i, 'm> Painter<'i, 'm> {
+    pub fn new(style: Style, input: &'i mut InputState, model: &'m mut Model) -> Self {
         Self {
             transform: Transform::default(),
+            placer: Placer2::default(),
             style,
             input,
-            debug: false,
-            text_input: None,
             model,
+            output: PainterOutput::default(),
+            debug: false,
         }
+    }
+
+    pub fn start_placing(&mut self, anchor: Vec2, align: Align2, item_align: Align2, dir: Vec2) {
+        self.placer = Placer2::new(
+            self.style.margin,
+            self.style.item_spacing,
+            anchor,
+            align,
+            item_align,
+            dir,
+            self.placer.bounds.size(),
+        );
+    }
+
+    pub fn set_placer(&mut self, p: Placer2) {
+        self.placer = p;
+    }
+    pub fn set_bounds(&mut self, b: Rect) {
+        self.placer.bounds = b;
+    }
+    pub fn bounds(&self) -> Rect {
+        self.placer.bounds
+    }
+
+    pub fn model_mut(&mut self) -> &mut Model {
+        self.model
+    }
+    pub fn style(&self) -> &Style {
+        &self.style
+    }
+    pub fn input(&self) -> &InputState {
+        self.input
     }
 
     pub fn set_transform(&mut self, t: Transform) {
         self.model.transform = t;
         self.transform = t;
     }
-    pub fn reset_transform(&mut self) {
-        self.transform = Transform::default();
-        self.model.transform = Transform::default();
-    }
-
-    fn debug_shape(&mut self, shape: Rect) {
-        if self.debug {
-            self.model.rect_outline(shape, 2.0, Color::RED.into());
-        }
-    }
 
     pub fn interact(&mut self, shape: Rect) -> Interaction {
-        let shape = self.transform.apply2(shape);
+        let shape = self.transform * shape;
         let mut rs = Interaction::default();
         rs.hovered = self.input.area_hovered(shape);
         rs.color = if self.input.area_hovered(shape) {
@@ -198,30 +362,101 @@ impl<'a, 'b> Painter<'a, 'b> {
         rs
     }
 
-    pub fn menu_background(&mut self, shape: Rect) {
-        let color = self.style.menu_background;
-        self.model.rect(shape, &MAIN_ATLAS.white, color);
+    pub fn input_mut(&mut self) -> &mut InputState {
+        self.input
+    }
+}
+impl<'i, 'm> Painter<'i, 'm> {
+    fn debug_shape(&mut self, shape: Rect) {
+        if self.debug {
+            self.model.rect_outline(shape, 2.0, Color::RED.into());
+        }
     }
 
-    pub fn button<T: AsRef<str>>(&mut self, shape: Rect, label: T) -> ButtonRs {
-        self.debug_shape(shape);
-        button(shape, label, self, false)
+    pub fn show_background(&mut self) {
+        self.model
+            .rect(self.bounds(), &MAIN_ATLAS.white, self.style.menu_background)
     }
-    pub fn circle_button<T: AsRef<str>>(&mut self, shape: Rect, label: T) -> ButtonRs {
+
+    pub fn button(&mut self, shape: Option<Rect>, label: impl AsRef<str>) -> Interaction {
+        let shape = shape.unwrap_or_else(|| {
+            let size = self.style.item_size;
+            let text_size = self.text_size(&label, self.style.text_size);
+            let size = size.max(text_size);
+            self.placer.next(size)
+        });
         self.debug_shape(shape);
-        button(shape, label, self, true)
+        let int = self.interact(shape);
+        // TODO: use rouneded_rect
+        self.model.rect(shape, &MAIN_ATLAS.white, int.color);
+        let text_size = self.text_size(&label, self.style.text_size);
+        self.place_text(
+            shape,
+            (label, text_size),
+            self.style.text_color,
+            Align2::CENTER,
+        );
+        int
     }
-    pub fn image_button(&mut self, shape: Rect, tex: &Image) -> ButtonRs {
+    pub fn circle_button(
+        &mut self,
+        center: Option<Vec2>,
+        size: Option<f32>,
+        label: impl AsRef<str>,
+    ) -> Interaction {
+        let size = Vec2::splat(size.unwrap_or(self.style.item_size.y));
+        let center = center.unwrap_or_else(|| self.placer.next(size).center());
+        let shape = Rect::from_center_size(center, size);
         self.debug_shape(shape);
-        image_button(shape, tex, self)
+        let int = self.interact(shape);
+        self.model.circle(center, size.x * 0.5, 20, int.color);
+        let text_size = self.text_size(&label, self.style.text_size);
+        self.place_text(
+            shape,
+            (label, text_size),
+            self.style.text_color,
+            Align2::CENTER,
+        );
+        int
     }
-    pub fn text_edit<T: AsRef<str>>(&mut self, shape: Rect, hint: T, field: &mut TextField) {
+    pub fn image_button(&mut self, shape: Option<Rect>, tex: &Image) -> Interaction {
+        let shape = shape.unwrap_or_else(|| self.placer.next(Vec2::splat(self.style.item_size.y)));
         self.debug_shape(shape);
+        let int = self.interact(shape);
+        self.model.rect(shape, tex, Color::WHITE.into());
+        int
+    }
+    pub fn text_edit(&mut self, shape: Option<Rect>, hint: impl AsRef<str>, field: &mut TextField) {
+        let shape = shape.unwrap_or_else(|| self.placer.next(self.style.item_size));
         text_edit(shape, hint, field, self)
     }
-    pub fn cycle<State: CycleState>(&mut self, shape: Rect, state: &mut State, changed: &mut bool) {
-        self.debug_shape(shape);
-        cycle(shape, state, self, changed)
+    pub fn cycle(
+        &mut self,
+        shape: Option<Rect>,
+        state: &mut impl CycleState,
+        changed: &mut bool,
+    ) -> Interaction {
+        let int = self.button(shape, state.label());
+        if int.clicked {
+            state.advance();
+            *changed = true;
+        }
+        int
+    }
+
+    pub fn toggle(
+        &mut self,
+        shape: Option<Rect>,
+        label: impl AsRef<str>,
+        state: &mut bool,
+        changed: &mut bool,
+    ) -> Interaction {
+        let int = self.button(shape, label);
+        if int.clicked {
+            *state ^= true;
+            *changed = true;
+        }
+        int
     }
 
     #[inline(always)]
@@ -229,15 +464,16 @@ impl<'a, 'b> Painter<'a, 'b> {
         super::text::text_size(text.as_ref(), scale as u32)
     }
 
-    pub fn custom_text(
+    pub fn place_text(
         &mut self,
         shape: Rect,
-        text: impl AsRef<str>,
+        (text, size2): (impl AsRef<str>, Vec2),
         color: ColorSrc,
         align: Align2,
     ) {
-        let scale = shape.height();
-        let size2 = self.text_size(&text, scale);
+        self.debug_shape(shape);
+        // let scale = shape.height();
+        let scale = size2.y;
         let min_x = match align.x {
             Align::Min => shape.min.x,
             Align::Center => shape.min.x + shape.width() * 0.5 - size2.x * 0.5,
@@ -248,6 +484,7 @@ impl<'a, 'b> Painter<'a, 'b> {
             Align::Center => shape.min.y + shape.height() * 0.5 - size2.y * 0.5,
             Align::Max => shape.max.y - size2.y,
         };
+        self.debug_shape(Rect::from_min_size(vec2(min_x, min_y), size2));
         super::text::build_text(
             &mut self.model,
             text.as_ref(),
@@ -257,204 +494,44 @@ impl<'a, 'b> Painter<'a, 'b> {
         )
     }
 
-    pub fn text<T: AsRef<str>>(&mut self, shape: Rect, text: T) {
-        self.debug_shape(shape);
-        self.custom_text(shape, text, self.style.text_color, self.style.text_align);
+    pub fn text_lg(&mut self, bounds: Option<Rect>, text: impl AsRef<str>) {
+        let size2 = self.text_size(&text, self.style.lg_text_size);
+        let bounds = bounds.unwrap_or_else(|| self.placer.next(size2));
+        self.place_text(bounds, (text, size2), self.style.text_color, Align2::MIN);
     }
-    pub fn seperator(&mut self, bounds: Rect) {
-        self.debug_shape(bounds);
-        let w = bounds.height() * 0.5;
-        let points = [bounds.min + vec2(0.0, w), bounds.max - vec2(0.0, w)];
+    pub fn text(&mut self, bounds: Option<Rect>, text: impl AsRef<str>) {
+        let size2 = self.text_size(&text, self.style.text_size);
+        let bounds = bounds.unwrap_or_else(|| self.placer.next(size2));
+        self.place_text(bounds, (text, size2), self.style.text_color, Align2::MIN);
+    }
+    pub fn seperator(&mut self) {
+        let shape = self.placer.next(vec2(
+            self.placer.bounds.width() - self.style.margin.x * 2.0,
+            self.style.seperator_w,
+        ));
+        self.debug_shape(shape);
+        let w = shape.height() * 0.5;
+        let points = [shape.min + vec2(0.0, w), shape.max - vec2(0.0, w)];
         self.model
             .line(points, w, &MAIN_ATLAS.white, self.style.item_color);
-    }
-
-    pub fn upload(&self, gpu: &Gpu) -> GpuModel {
-        self.model.upload(&gpu.device)
-    }
-}
-
-pub struct Placer<'a> {
-    pub anchor: Vec2,
-    pub align_to_anchor: Align2,
-    pub item_align: Align2,
-    pub bounds: Rect,
-    pub style: &'a Style,
-    pub next_pos: Vec2,
-    pub dir: Vec2,
-    pub dirty: bool,
-}
-impl<'a> Placer<'a> {
-    fn create_bounds(anchor: Vec2, align: Align2, size: Vec2) -> Rect {
-        let x = match align.x {
-            Align::Min => anchor.x,
-            Align::Center => anchor.x - size.x * 0.5,
-            Align::Max => anchor.x - size.x,
-        };
-        let y = match align.y {
-            Align::Min => anchor.y,
-            Align::Center => anchor.y - size.y * 0.5,
-            Align::Max => anchor.y - size.y,
-        };
-        Rect::from_min_size(vec2(x, y), size)
-    }
-    fn create_start_pos(style: &Style, item_align: Align2, bounds: Rect) -> Vec2 {
-        let ui_bounds = bounds.shrink(style.margin);
-        match item_align.x {
-            Align::Min => vec2(ui_bounds.min.x, ui_bounds.min.y),
-            Align::Max => vec2(ui_bounds.max.x, ui_bounds.min.y),
-            Align::Center => ui_bounds.min + vec2(ui_bounds.width() * 0.5, 0.0),
-        }
-    }
-
-    pub fn new(
-        style: &'a Style,
-        anchor: Vec2,
-        align_to_anchor: Align2,
-        item_align: Align2,
-        dir: Vec2,
-    ) -> Self {
-        let bounds = Self::create_bounds(anchor, align_to_anchor, Vec2::ZERO);
-        Self {
-            anchor,
-            align_to_anchor,
-            item_align,
-            bounds,
-            dir,
-
-            style,
-            next_pos: Self::create_start_pos(style, item_align, bounds),
-            dirty: true,
-        }
-    }
-
-    pub fn start(&mut self) -> bool {
-        if self.dirty {
-            self.dirty = false;
-            self.bounds =
-                Self::create_bounds(self.anchor, self.align_to_anchor, self.bounds.size());
-            self.next_pos = Self::create_start_pos(self.style, self.item_align, self.bounds);
-            return true;
-        }
-        false
-    }
-
-    fn prepare_for_size(&mut self, size: Vec2) {
-        let max = self.bounds.min + self.style.margin * 2.0 + size;
-        if !self.bounds.contains(max) {
-            self.bounds.expand_to_contain(max);
-            self.dirty = true;
-        }
-    }
-
-    fn rect_result(&mut self, rect: Rect) -> Rect {
-        let max = rect.max + self.style.margin;
-        if !self.bounds.contains(max) {
-            self.dirty = true;
-        }
-        self.bounds.expand_to_contain(max);
-        rect
-    }
-
-    pub fn next(&mut self) -> Rect {
-        let anchor = self.next_pos;
-        let size = self.style.item_size;
-        self.prepare_for_size(size);
-        let min = match self.item_align.x {
-            Align::Min => anchor,
-            Align::Center => vec2(anchor.x - size.x * 0.5, anchor.y),
-            Align::Max => vec2(anchor.x - size.x, anchor.y),
-        };
-        self.next_pos += self.dir * (size + self.style.item_spacing);
-        self.rect_result(Rect::from_min_size(min, size))
-    }
-
-    pub fn image_button(&mut self) -> Rect {
-        let anchor = self.next_pos;
-        let size = Vec2::splat(self.style.item_size.y);
-        self.prepare_for_size(size);
-        let min = match self.item_align.x {
-            Align::Min => anchor,
-            Align::Center => vec2(anchor.x - size.x * 0.5, anchor.y),
-            Align::Max => vec2(anchor.x - size.x, anchor.y),
-        };
-        self.next_pos += self.dir * (size + self.style.item_spacing);
-        self.rect_result(Rect::from_min_size(min, size))
-    }
-
-    pub fn seperator(&mut self) -> Rect {
-        let anchor = self.next_pos;
-        let size = vec2(self.style.item_size.x, self.style.seperator_w);
-        self.prepare_for_size(size);
-        let min = match self.item_align.x {
-            Align::Min => anchor,
-            Align::Center => vec2(anchor.x - size.x * 0.5, anchor.y),
-            Align::Max => vec2(anchor.x - size.x, anchor.y),
-        };
-        self.next_pos += self.dir * (size + self.style.item_spacing);
-        self.rect_result(Rect::from_min_size(min, size))
     }
 }
 
 // --------------- Widgets -----------------
-
-#[derive(Default)]
-pub struct ButtonRs {
-    pub triggered: bool,
-}
-pub fn button<T: AsRef<str>>(
-    shape: Rect,
-    label: T,
-    painter: &mut Painter,
-    circle: bool,
-) -> ButtonRs {
-    let mut rs = ButtonRs::default();
-    let Interaction { color, clicked, .. } = painter.interact(shape);
-
-    match circle {
-        true => painter
-            .model
-            .circle(shape.center(), shape.width() * 0.5, 20, color),
-        false => painter.model.rect(shape, &MAIN_ATLAS.white, color),
-    }
-    painter.text(shape, label);
-
-    if clicked {
-        rs.triggered = true;
-    }
-    rs
-}
-
-pub fn image_button(shape: Rect, tex: &Image, painter: &mut Painter) -> ButtonRs {
-    let mut rs = ButtonRs::default();
-    let Interaction { color, clicked, .. } = painter.interact(shape);
-    painter.model.rect(shape, &MAIN_ATLAS.white, color);
-    painter.model.rect(shape, tex, Color::WHITE.into());
-    if clicked {
-        rs.triggered = true;
-    }
-    rs
-}
-
 #[derive(Default)]
 pub struct TextField {
     pub text: String,
     pub focused: bool,
     pub cursor: u32,
 }
-pub fn text_edit<T: AsRef<str>>(
-    shape: Rect,
-    hint: T,
-    field: &mut TextField,
-    painter: &mut Painter,
-) {
+pub fn text_edit(shape: Rect, hint: impl AsRef<str>, field: &mut TextField, g: &mut Painter) {
     let hint = hint.as_ref();
     let Interaction {
         color,
         clicked,
         clicked_elsewhere,
         ..
-    } = painter.interact(shape);
+    } = g.interact(shape);
 
     if clicked {
         field.focused = true;
@@ -463,27 +540,27 @@ pub fn text_edit<T: AsRef<str>>(
     }
 
     if field.focused {
-        if painter.input.pasted_text().len() > 0 {
-            field.text += painter.input.pasted_text();
+        if g.input.pasted_text().len() > 0 {
+            field.text += g.input.pasted_text();
         }
-        if let Some(input) = &painter.input.text_input() {
+        if let Some(input) = &g.input.text_input() {
             field.text = input.text.clone();
             field.cursor = input.selection.end;
-        } else if painter.input.key_pressed(Key::Backspace) {
+        } else if g.input.key_pressed(Key::Backspace) {
             if field.text.pop().is_some() {
                 field.cursor -= 1;
             }
-        } else if painter.input.key_pressed(Key::Space) {
+        } else if g.input.key_pressed(Key::Space) {
             field.text.push(' ');
             field.cursor += 1;
-        } else if painter.input.key_pressed(Key::Tab) {
+        } else if g.input.key_pressed(Key::Tab) {
             field.text.push('\t');
             field.cursor += 1;
-        } else if let Some(ch) = painter.input.char_press() {
+        } else if let Some(ch) = g.input.char_press() {
             field.text.push(ch);
             field.cursor += 1;
         }
-        painter.text_input = Some(TextInputState {
+        g.output.text_input = Some(TextInputState {
             text: field.text.clone(),
             selection: field.cursor..field.cursor,
             compose: Some(field.cursor..field.cursor + 1),
@@ -491,11 +568,9 @@ pub fn text_edit<T: AsRef<str>>(
     }
 
     field.cursor = field.text.len() as u32;
-    painter.model.rect(shape, &MAIN_ATLAS.white, color);
+    g.model.rect(shape, &MAIN_ATLAS.white, color);
     if field.focused {
-        painter
-            .model
-            .rect_outline(shape, 2.0, painter.style.text_color);
+        g.model.rect_outline(shape, 2.0, g.style.text_color);
 
         // CURSOR:
         // let sc = shape.height();
@@ -524,8 +599,8 @@ pub fn text_edit<T: AsRef<str>>(
     }
 
     let text_color = match field.text.is_empty() {
-        true => painter.style.item_press_color,
-        false => painter.style.text_color,
+        true => g.style.item_press_color,
+        false => g.style.text_color,
     };
     let text: &str = match field.text.is_empty() {
         true => hint,
@@ -533,23 +608,12 @@ pub fn text_edit<T: AsRef<str>>(
     };
 
     if !text.is_empty() {
-        painter.custom_text(shape, text, text_color, Align2::MIN);
+        let size = g.text_size(text, g.style.text_size);
+        g.place_text(shape, (text, size), text_color, Align2::MIN);
     }
 }
 
 pub trait CycleState {
     fn advance(&mut self);
     fn label(&self) -> &'static str;
-}
-pub fn cycle<State>(shape: Rect, state: &mut State, painter: &mut Painter, changed: &mut bool)
-where
-    State: CycleState,
-{
-    let Interaction { clicked, color, .. } = painter.interact(shape);
-    if clicked {
-        state.advance();
-        *changed = true;
-    }
-    painter.model.rect(shape, &MAIN_ATLAS.white, color);
-    painter.text(shape, state.label());
 }

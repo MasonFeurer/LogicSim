@@ -87,9 +87,9 @@ impl Model {
     }
 
     pub fn raw_tri(&mut self, mut vertices: [Vertex; 3]) {
-        vertices[0].pos = self.transform.apply(vertices[0].pos.into()).into();
-        vertices[1].pos = self.transform.apply(vertices[1].pos.into()).into();
-        vertices[2].pos = self.transform.apply(vertices[2].pos.into()).into();
+        vertices[0].pos = (self.transform * Vec2::from(vertices[0].pos)).into();
+        vertices[1].pos = (self.transform * Vec2::from(vertices[1].pos)).into();
+        vertices[2].pos = (self.transform * Vec2::from(vertices[2].pos)).into();
         let i = self.vertices.len() as Index;
         for v in &vertices {
             self.bounds.expand_to_contain(v.pos.into());
@@ -99,10 +99,10 @@ impl Model {
     }
 
     pub fn raw_quad(&mut self, mut vertices: [Vertex; 4]) {
-        vertices[0].pos = self.transform.apply(vertices[0].pos.into()).into();
-        vertices[1].pos = self.transform.apply(vertices[1].pos.into()).into();
-        vertices[2].pos = self.transform.apply(vertices[2].pos.into()).into();
-        vertices[3].pos = self.transform.apply(vertices[3].pos.into()).into();
+        vertices[0].pos = (self.transform * Vec2::from(vertices[0].pos)).into();
+        vertices[1].pos = (self.transform * Vec2::from(vertices[1].pos)).into();
+        vertices[2].pos = (self.transform * Vec2::from(vertices[2].pos)).into();
+        vertices[3].pos = (self.transform * Vec2::from(vertices[3].pos)).into();
         let i = self.vertices.len() as Index;
         for v in &vertices {
             self.bounds.expand_to_contain(v.pos.into());

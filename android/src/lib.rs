@@ -220,6 +220,10 @@ struct State {
     input: InputState,
     translater: TouchTranslater,
     text_input: Option<TextInputState>,
+
+    frame_count: u32,
+    last_fps_update: SystemTime,
+    fps: u32,
 }
 
 #[no_mangle]
@@ -240,6 +244,10 @@ fn android_main(android: AndroidApp) {
         input: InputState::default(),
         translater: TouchTranslater::default(),
         text_input: None,
+
+        frame_count: 0,
+        last_fps_update: SystemTime::now(),
+        fps: 0,
     };
     let mut last_frame_time = SystemTime::now();
     let timeout = Duration::from_millis(1000 / 60);
@@ -261,6 +269,21 @@ fn android_main(android: AndroidApp) {
                 .as_millis()
                 > (1000 / 60);
             if redraw && state.running {
+                // Update FPS
+                {
+                    state.frame_count += 1;
+                    if SystemTime::now()
+                        .duration_since(state.last_fps_update)
+                        .unwrap()
+                        .as_secs()
+                        >= 1
+                    {
+                        state.last_fps_update = SystemTime::now();
+                        state.fps = state.frame_count;
+                        state.frame_count = 0;
+                    }
+                }
+
                 last_frame_time = SystemTime::now();
                 draw_frame(&mut state);
             }
@@ -441,7 +464,7 @@ fn draw_frame(state: &mut State) {
     let mut text_input = None;
     match state
         .app
-        .draw_frame(&mut state.input, content_rect, &mut text_input)
+        .draw_frame(&mut state.input, content_rect, &mut text_input, state.fps)
     {
         Err(err) => {
             log::warn!("Failed to draw frame: {err:?}");
