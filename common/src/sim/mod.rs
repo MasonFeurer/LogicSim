@@ -1,10 +1,12 @@
 pub mod save;
 pub mod scene;
 
+use serde::{Deserialize, Serialize};
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct TruthTableId(pub u16);
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct NodeAddr(pub u32);
 
 #[derive(Clone, Copy, Debug)]
@@ -31,7 +33,7 @@ impl IntoIterator for NodeRange {
 ///
 /// bytes 1-7: SourceData
 ///
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Node(u64);
 impl std::fmt::Debug for Node {
@@ -73,7 +75,7 @@ impl Node {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum SourceTy {
     None,
@@ -180,7 +182,7 @@ pub struct TruthTableSource {
     pub id: TruthTableId,
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct NodeRegion {
     pub min: NodeAddr,
     pub max: NodeAddr,
@@ -209,7 +211,7 @@ impl NodeRegion {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct TruthTable {
     pub num_inputs: u8,
     pub num_outputs: u8,
@@ -217,17 +219,15 @@ pub struct TruthTable {
     pub map: Box<[u64]>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Sim {
     pub nodes: Vec<Node>,
-    pub tables: Vec<TruthTable>,
     pub next_region: u32,
 }
 impl Default for Sim {
     fn default() -> Self {
         Self {
             nodes: vec![Node::default()],
-            tables: vec![],
             next_region: 1,
         }
     }
@@ -290,10 +290,10 @@ impl Sim {
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, tables: &[TruthTable]) {
         let mut new_nodes = self.nodes.clone();
         for (idx, node) in self.nodes.iter().enumerate() {
-            Self::update_node(*node, &mut new_nodes[idx], &self.nodes, &self.tables);
+            Self::update_node(*node, &mut new_nodes[idx], &self.nodes, tables);
         }
         self.nodes = new_nodes;
     }

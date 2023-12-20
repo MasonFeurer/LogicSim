@@ -14,6 +14,7 @@ use raw_window_handle::{
     AndroidDisplayHandle, HasRawDisplayHandle, HasRawWindowHandle, RawDisplayHandle,
     RawWindowHandle,
 };
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, SystemTime};
 
@@ -210,7 +211,24 @@ impl TouchTranslater {
     }
 }
 
+struct SaveDirs {
+    settings: PathBuf,
+    library: PathBuf,
+    scene: PathBuf,
+}
+impl SaveDirs {
+    fn new(android: &AndroidApp) -> Self {
+        let dir = android.external_data_path().unwrap();
+        Self {
+            settings: dir.join("settings.data"),
+            library: dir.join("library.data"),
+            scene: dir.join("scene.data"),
+        }
+    }
+}
+
 struct State {
+    save_dirs: SaveDirs,
     combining_accent: Option<char>,
     window: Option<Window>,
     quit: bool,
@@ -235,6 +253,7 @@ fn android_main(android: AndroidApp) {
         .init();
 
     let mut state = State {
+        save_dirs: SaveDirs::new(&android),
         combining_accent: None,
         window: None,
         quit: false,
@@ -249,6 +268,7 @@ fn android_main(android: AndroidApp) {
         last_fps_update: SystemTime::now(),
         fps: 0,
     };
+
     let mut last_frame_time = SystemTime::now();
     let timeout = Duration::from_millis(1000 / 60);
 
@@ -293,7 +313,36 @@ fn android_main(android: AndroidApp) {
 
 fn handle_main_event(event: MainEvent, state: &mut State) {
     match event {
-        MainEvent::SaveState { .. } => {}
+        MainEvent::SaveState { .. } => {
+            log::info!("Saving app's state...");
+
+            let settings = bincode::serialize(&state.app.settings).unwrap();
+            match std::fs::write(&state.save_dirs.settings, &settings) {
+                Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
+                Err(err) => log::warn!(
+                    "Failed to save settings to {:?} : {err:?}",
+                    state.save_dirs.settings
+                ),
+            }
+
+            let library = bincode::serialize(&state.app.library).unwrap();
+            match std::fs::write(&state.save_dirs.library, &library) {
+                Ok(_) => log::info!("Saved library to {:?}", state.save_dirs.library),
+                Err(err) => log::warn!(
+                    "Failed to save library to {:?} : {err:?}",
+                    state.save_dirs.library
+                ),
+            }
+
+            let scene = bincode::serialize(&state.app.scene()).unwrap();
+            match std::fs::write(&state.save_dirs.scene, &scene) {
+                Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
+                Err(err) => log::warn!(
+                    "Failed to save scene to {:?} : {err:?}",
+                    state.save_dirs.scene
+                ),
+            }
+        }
         MainEvent::Pause => {
             log::info!("App paused - dropping display & GPU handles...");
 
@@ -302,6 +351,25 @@ fn handle_main_event(event: MainEvent, state: &mut State) {
         }
         MainEvent::Resume { .. } => {
             log::info!("App resumed");
+
+            if let Ok(bytes) = std::fs::read(&state.save_dirs.settings) {
+                match bincode::deserialize(&bytes) {
+                    Ok(settings) => state.app.settings = settings,
+                    Err(err) => log::warn!("Failed to parse settings: {err:?}"),
+                }
+            }
+            if let Ok(bytes) = std::fs::read(&state.save_dirs.library) {
+                match bincode::deserialize(&bytes) {
+                    Ok(library) => state.app.library = library,
+                    Err(err) => log::warn!("Failed to parse library: {err:?}"),
+                }
+            }
+            if let Ok(bytes) = std::fs::read(&state.save_dirs.scene) {
+                match bincode::deserialize(&bytes) {
+                    Ok(scene) => *state.app.scene_mut() = scene,
+                    Err(err) => log::warn!("Failed to parse scene: {err:?}"),
+                }
+            }
             state.running = true;
         }
         MainEvent::InitWindow { .. } => {

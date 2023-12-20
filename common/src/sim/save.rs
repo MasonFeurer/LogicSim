@@ -1,13 +1,16 @@
 use crate::sim::{self, scene, NodeRegion, TruthTable};
-use crate::Id;
 use glam::Vec2;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug)]
+pub type SaveId = crate::Id;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum IoType {
     Input,
     Output,
 }
 
+#[derive(Serialize, Deserialize)]
 pub struct Library {
     pub tables: Vec<TruthTable>,
     pub chips: Vec<ChipSave>,
@@ -79,19 +82,16 @@ impl Library {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct SaveId(pub u32);
-
 /// Note: A Node can only hava 1 source,
 /// so if a chip writes to one of its external pins than that pin can not
 /// be written to externally.
 
 /// A device can not save externally interactive components like lights or buttons.
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ChipSave {
     pub region_size: u32,
     pub name: String,
-    pub scene: Option<Id>,
+    pub scene: Option<scene::Scene>,
     pub l_nodes: Vec<(String, sim::NodeAddr, sim::Node)>,
     pub r_nodes: Vec<(String, sim::NodeAddr, sim::Node)>,
     pub inner_nodes: Vec<(sim::NodeAddr, sim::Node)>,

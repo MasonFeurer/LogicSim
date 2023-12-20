@@ -12,7 +12,7 @@ pub use sim::*;
 pub use glam;
 pub use wgpu;
 
-#[derive(Hash, Debug, Eq, PartialEq, Clone, Copy)]
+#[derive(Hash, Debug, Eq, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
 pub struct Id(pub u64);
 impl Id {
     pub fn new<T: std::hash::Hash>(v: T) -> Self {

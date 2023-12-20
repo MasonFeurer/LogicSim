@@ -3,23 +3,25 @@ use crate::graphics::{Color, Rect, Transform, MAIN_ATLAS};
 use crate::input::PtrButton;
 use crate::sim::{save, NodeAddr, NodeRegion, Sim};
 use crate::Id;
+
 use glam::{vec2, Vec2};
+use serde::{Deserialize, Serialize};
+
 use std::collections::HashMap;
-use std::fmt::Debug;
 
 pub type SceneId = crate::Id;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Rotation {
     Rot0,
     Rot90,
     Rot180,
     Rot270,
 }
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub struct SceneColor(pub u32);
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Connection {
     pub id: u32,
     pub pos: Vec2,
@@ -27,10 +29,10 @@ pub struct Connection {
     pub state: NodeAddr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct DeviceConnection(pub SceneId, pub Connection);
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NamedConnection<'a>(pub &'a str, pub Connection);
 
 const NODE_SPACING: f32 = 5.0;
@@ -38,7 +40,7 @@ const CHIP_W: f32 = 100.0;
 const NODE_SIZE: f32 = 30.0;
 const BG_NODE_SIZE: f32 = 50.0;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct ExternalNodes {
     pub pos: Vec2,
     pub states: Vec<NodeAddr>,
@@ -46,13 +48,14 @@ pub struct ExternalNodes {
 impl ExternalNodes {
     pub fn draw(
         &mut self,
-        id: Id,
+        name: &str,
         t: Transform,
         ui: &mut Painter,
         bg_hovered: &mut bool,
         sim: &mut Sim,
         out: &mut SceneOutput,
     ) {
+        let id = Id::new(name);
         let w = BG_NODE_SIZE;
         let header_h = ui.style().item_size.y;
         let h = (self.states.len() as f32 + 1.0) * (NODE_SPACING + w) + NODE_SPACING + header_h;
@@ -63,10 +66,10 @@ impl ExternalNodes {
         let bg = ui.style().menu_background;
         ui.model_mut().rect(bounds, &MAIN_ATLAS.white, bg);
         let header_rect = Rect::from_min_size(bounds.min, vec2(w, ui.style().item_size.y));
-        let header_text_size = ui.text_size("IO", w);
+        let header_text_size = ui.text_size(name, w);
         ui.place_text(
             header_rect,
-            ("IO", header_text_size),
+            (name, header_text_size),
             ui.style().text_color,
             Align2::CENTER,
         );
@@ -125,48 +128,39 @@ pub struct SceneOutput {
     pub clicked_chip: Option<SceneId>,
 }
 
-#[derive(Default, Debug)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Scene {
+    pub name: String,
+    pub sim: Sim,
     pub transform: Transform,
-    pub left_nodes: ExternalNodes,
-    pub right_nodes: ExternalNodes,
-    pub devices: HashMap<SceneId, Box<dyn DeviceImpl>>,
+    pub l_nodes: ExternalNodes,
+    pub r_nodes: ExternalNodes,
+    pub devices: HashMap<SceneId, Device>,
     pub wires: Vec<Wire>,
     pub wire_bundles: Vec<WireBundle>,
 }
 impl Scene {
     pub fn clear(&mut self) {
-        self.left_nodes.states.clear();
-        self.right_nodes.states.clear();
+        self.l_nodes.states.clear();
+        self.r_nodes.states.clear();
         self.devices.clear();
         self.wires.clear();
         self.wire_bundles.clear();
+        self.sim.clear();
     }
 
     pub fn init(&mut self, view: Rect) {
-        self.left_nodes.pos = vec2(view.min.x, view.min.y + view.height() * 0.3);
-        self.right_nodes.pos = vec2(view.max.x - BG_NODE_SIZE, view.min.y + view.height() * 0.3);
+        self.l_nodes.pos = vec2(view.min.x, view.min.y + view.height() * 0.3);
+        self.r_nodes.pos = vec2(view.max.x - BG_NODE_SIZE, view.min.y + view.height() * 0.3);
     }
 
-    pub fn draw(&mut self, ui: &mut Painter, bg_hovered: &mut bool, sim: &mut Sim) -> SceneOutput {
+    pub fn draw(&mut self, ui: &mut Painter, bg_hovered: &mut bool) -> SceneOutput {
         let mut out = SceneOutput::default();
 
-        self.left_nodes.draw(
-            Id::new("lio"),
-            self.transform,
-            ui,
-            bg_hovered,
-            sim,
-            &mut out,
-        );
-        self.right_nodes.draw(
-            Id::new("rio"),
-            self.transform,
-            ui,
-            bg_hovered,
-            sim,
-            &mut out,
-        );
+        self.l_nodes
+            .draw("L", self.transform, ui, bg_hovered, &mut self.sim, &mut out);
+        self.r_nodes
+            .draw("R", self.transform, ui, bg_hovered, &mut self.sim, &mut out);
 
         for (id, device) in &mut self.devices {
             let bounds = device.bounds();
@@ -181,28 +175,59 @@ impl Scene {
                 let offset = drag.press_pos - self.transform * drag.anchor;
                 device.move_anchor(self.transform.inv() * (ui.input().ptr_pos() - offset));
             }
-            device.draw(Some(*id), ui, sim, &mut out);
+            device.draw(Some(*id), ui, &mut self.sim, &mut out);
         }
         out
     }
 
-    pub fn add_device(&mut self, device: impl DeviceImpl + 'static) {
+    pub fn add_device(&mut self, device: impl Into<Device>) {
         self.devices
-            .insert(SceneId::new(fastrand::u32(..)), Box::new(device));
+            .insert(SceneId::new(fastrand::u32(..)), device.into());
     }
 }
 
-pub trait DeviceImpl: Debug {
-    fn get_anchor(&self) -> Vec2;
-    fn move_anchor(&mut self, pos: Vec2);
-    fn size(&self) -> Vec2;
-    fn draw(&self, id: Option<SceneId>, ui: &mut Painter, sim: &mut Sim, out: &mut SceneOutput);
-    fn bounds(&self) -> Rect;
-    fn connection_preview(&self, pos: Vec2) -> Option<NamedConnection>;
-    fn sim_nodes(&self) -> Vec<NodeAddr>;
+#[derive(Clone, Serialize, Deserialize)]
+pub enum Device {
+    Chip(Chip),
+}
+impl Device {
+    pub fn draw(&self, id: Option<SceneId>, p: &mut Painter, sim: &mut Sim, out: &mut SceneOutput) {
+        match self {
+            Self::Chip(chip) => chip.draw(id, p, sim, out),
+        }
+    }
+
+    pub fn move_anchor(&mut self, pos: Vec2) {
+        match self {
+            Self::Chip(chip) => chip.move_anchor(pos),
+        }
+    }
+
+    pub fn bounds(&self) -> Rect {
+        match self {
+            Self::Chip(chip) => chip.bounds(),
+        }
+    }
+
+    pub fn get_anchor(&self) -> Vec2 {
+        match self {
+            Self::Chip(chip) => chip.get_anchor(),
+        }
+    }
+
+    pub fn sim_nodes(&self) -> Vec<NodeAddr> {
+        match self {
+            Self::Chip(chip) => chip.sim_nodes(),
+        }
+    }
+}
+impl From<Chip> for Device {
+    fn from(c: Chip) -> Device {
+        Self::Chip(c)
+    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Chip {
     pub region: NodeRegion,
     pub pos: Vec2,
@@ -213,7 +238,7 @@ pub struct Chip {
     pub r_nodes: Vec<(NodeAddr, String, save::IoType)>,
     pub inner_nodes: Vec<NodeAddr>,
 }
-impl DeviceImpl for Chip {
+impl Chip {
     fn sim_nodes(&self) -> Vec<NodeAddr> {
         let mut out =
             Vec::with_capacity(self.l_nodes.len() + self.r_nodes.len() + self.inner_nodes.len());
@@ -236,15 +261,20 @@ impl DeviceImpl for Chip {
         self.pos = pos;
     }
 
-    fn size(&self) -> Vec2 {
+    pub fn size(&self) -> Vec2 {
         let max_nodes = self.l_nodes.len().max(self.r_nodes.len()) as f32;
         vec2(
             CHIP_W,
             max_nodes * (NODE_SIZE + NODE_SPACING) + NODE_SPACING,
         )
     }
-    fn draw(&self, id: Option<SceneId>, ui: &mut Painter, sim: &mut Sim, out: &mut SceneOutput) {
-        // let node_color = Color::shade(40).into();
+    pub fn draw(
+        &self,
+        id: Option<SceneId>,
+        ui: &mut Painter,
+        sim: &mut Sim,
+        out: &mut SceneOutput,
+    ) {
         let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
 
         let max_nodes = self.l_nodes.len().max(self.r_nodes.len()) as f32;
@@ -318,63 +348,26 @@ impl DeviceImpl for Chip {
         );
     }
 
-    fn bounds(&self) -> Rect {
+    pub fn bounds(&self) -> Rect {
         let size = self.size();
         Rect::from_center_size(self.pos, size)
     }
-    fn connection_preview(&self, pos: Vec2) -> Option<NamedConnection> {
-        let bounds = self.bounds();
-
-        if pos.x <= bounds.min.x + NODE_SIZE * 0.5 {
-            let offset_y = pos.y - bounds.min.y;
-            let node_idx = (offset_y / bounds.height()).floor() as i32;
-            if node_idx < 0 || node_idx >= self.l_nodes.len() as i32 {
-                return None;
-            }
-            Some(NamedConnection(
-                &self.l_nodes[node_idx as usize].1,
-                Connection {
-                    state: self.l_nodes[node_idx as usize].0,
-                    id: node_idx as u32,
-                    pos: vec2(bounds.min.x, bounds.min.y + node_idx as f32 * NODE_SIZE),
-                    size: NODE_SIZE,
-                },
-            ))
-        } else if pos.x >= bounds.max.x - NODE_SIZE * 0.5 {
-            let offset_y = pos.y - bounds.min.y;
-            let node_idx = (offset_y / bounds.height()).floor() as i32;
-            if node_idx < 0 || node_idx >= self.r_nodes.len() as i32 {
-                return None;
-            }
-            Some(NamedConnection(
-                &self.r_nodes[node_idx as usize].1,
-                Connection {
-                    state: self.r_nodes[node_idx as usize].0,
-                    id: node_idx as u32,
-                    pos: vec2(bounds.max.x, bounds.min.y + node_idx as f32 * NODE_SIZE),
-                    size: NODE_SIZE,
-                },
-            ))
-        } else {
-            None
-        }
-    }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Button {
     pub pos: Vec2,
     pub state: NodeAddr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Light {
     pub color: SceneColor,
     pub pos: Vec2,
     pub state: NodeAddr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Bus {
     pub pos: Vec2,
     pub height: f32,
@@ -382,26 +375,26 @@ pub struct Bus {
     pub state: NodeAddr,
 }
 
-#[derive(Debug, Clone)]
-pub struct SevenSegDisplayProto {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SegmentDisplay {
     pub pos: Vec2,
     pub inputs: [NodeAddr; 7],
 }
 
-#[derive(Debug, Clone)]
-pub struct SevenSegDisplay {
+#[derive(Clone, Serialize, Deserialize)]
+pub struct MatrixDisplay {
     pub pos: Vec2,
-    pub inputs: [NodeAddr; 4],
+    pub inputs: [NodeAddr; 7],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Wire {
     pub input: DeviceConnection,
     pub output: DeviceConnection,
     pub anchors: Vec<Vec2>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WireBundle {
     pub inputs: Vec<DeviceConnection>,
     pub outputs: Vec<DeviceConnection>,

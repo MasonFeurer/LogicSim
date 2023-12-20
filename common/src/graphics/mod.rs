@@ -10,6 +10,7 @@ pub use renderer::*;
 
 use crate::sim::NodeAddr;
 use glam::{vec2, vec4, Vec2, Vec4};
+use serde::{Deserialize, Serialize};
 use std::fmt;
 
 #[derive(Clone, Copy, Default)]
@@ -241,7 +242,7 @@ impl Rect {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Transform {
     pub offset: Vec2,
     pub scale: f32,

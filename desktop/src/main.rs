@@ -4,6 +4,7 @@ use logisim::glam::vec2;
 use logisim::input::{InputEvent, InputState, PtrButton, TextInputState};
 use logisim::{app::App, Rect};
 
+use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
@@ -12,6 +13,24 @@ use winit::keyboard::{Key, NamedKey};
 use winit::window::Window;
 
 use clipboard::ClipboardProvider;
+
+struct SaveDirs {
+    settings: PathBuf,
+    library: PathBuf,
+    scene: PathBuf,
+}
+impl SaveDirs {
+    fn new() -> Self {
+        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
+        let dir = dirs.data_dir();
+        _ = std::fs::create_dir(dir);
+        Self {
+            settings: dir.join("settings.data"),
+            library: dir.join("library.data"),
+            scene: dir.join("scene.data"),
+        }
+    }
+}
 
 fn main() {
     env_logger::init();
@@ -30,11 +49,31 @@ fn main() {
             .map_err(|err| log::warn!("Failed to init system clipboard: {err:?}"))
             .ok(),
         text_input: None,
+        save_dirs: SaveDirs::new(),
 
         frame_count: 0,
         last_fps_update: SystemTime::now(),
         fps: 0,
     };
+
+    if let Ok(bytes) = std::fs::read(&state.save_dirs.settings) {
+        match bincode::deserialize(&bytes) {
+            Ok(settings) => state.app.settings = settings,
+            Err(err) => log::warn!("Failed to parse settings: {err:?}"),
+        }
+    }
+    if let Ok(bytes) = std::fs::read(&state.save_dirs.library) {
+        match bincode::deserialize(&bytes) {
+            Ok(library) => state.app.library = library,
+            Err(err) => log::warn!("Failed to parse library: {err:?}"),
+        }
+    }
+    if let Ok(bytes) = std::fs::read(&state.save_dirs.scene) {
+        match bincode::deserialize(&bytes) {
+            Ok(scene) => *state.app.scene_mut() = scene,
+            Err(err) => log::warn!("Failed to parse scene: {err:?}"),
+        }
+    }
 
     _ = event_loop.run(move |event, event_loop| {
         let mut exit = false;
@@ -52,6 +91,7 @@ struct State {
     last_frame_time: SystemTime,
     clipboard: Option<clipboard::ClipboardContext>,
     text_input: Option<TextInputState>,
+    save_dirs: SaveDirs,
 
     frame_count: u32,
     last_fps_update: SystemTime,
@@ -68,6 +108,34 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         }
         Event::Suspended => println!("suspended"),
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
+        Event::LoopExiting => {
+            let settings = bincode::serialize(&state.app.settings).unwrap();
+            match std::fs::write(&state.save_dirs.settings, &settings) {
+                Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
+                Err(err) => log::warn!(
+                    "Failed to save settings to {:?} : {err:?}",
+                    state.save_dirs.settings
+                ),
+            }
+
+            let library = bincode::serialize(&state.app.library).unwrap();
+            match std::fs::write(&state.save_dirs.library, &library) {
+                Ok(_) => log::info!("Saved library to {:?}", state.save_dirs.library),
+                Err(err) => log::warn!(
+                    "Failed to save library to {:?} : {err:?}",
+                    state.save_dirs.library
+                ),
+            }
+
+            let scene = bincode::serialize(&state.app.scene()).unwrap();
+            match std::fs::write(&state.save_dirs.scene, &scene) {
+                Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
+                Err(err) => log::warn!(
+                    "Failed to save scene to {:?} : {err:?}",
+                    state.save_dirs.scene
+                ),
+            }
+        }
         _ => {}
     }
 }
