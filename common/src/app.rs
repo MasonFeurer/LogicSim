@@ -145,7 +145,7 @@ impl UiState {
 
 pub fn show_info_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
     let mut p = MenuPainter::new(bounds, p);
-    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
+    p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
     p.text_lg(None, "Info");
     p.seperator();
 
@@ -164,22 +164,16 @@ pub fn show_info_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &
     }
 }
 
-pub fn show_options_menu(
-    bounds: &mut Rect,
-    p: &mut Painter,
-    screen: Rect,
-    state: &mut UiState,
-    layouts_dirty: &mut bool,
-) {
+pub fn show_options_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
     let mut p = MenuPainter::new(bounds, p);
-    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
+    p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
     p.text_lg(None, "Options");
     p.seperator();
     if p.button(None, "Info").clicked {
         state.open_menu = Some(Menu::Info);
     }
-    p.cycle(None, &mut state.ui_size, layouts_dirty);
+    p.cycle(None, &mut state.ui_size, &mut false);
     p.cycle(None, &mut state.ui_theme, &mut false);
     p.toggle(None, "Debug UI", &mut state.debug_ui, &mut false);
     if p.button(None, "Clear The Scene").clicked {
@@ -192,7 +186,7 @@ pub fn show_options_menu(
 
 pub fn show_save_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
     let mut p = MenuPainter::new(bounds, p);
-    p.start_placing(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
+    p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
     p.text_lg(None, "Save to Chip");
     p.seperator();
@@ -214,7 +208,7 @@ pub fn show_overlay(
     state: &mut UiState,
 ) {
     let mut p = MenuPainter::new(bounds, p);
-    p.start_placing(screen.min, Align2::MIN, Align2::MIN, Vec2::X);
+    p.start(screen.min, Align2::MIN, Align2::MIN, Vec2::X);
 
     if p.image_button(None, &MAIN_ATLAS["options_icon"]).clicked {
         state.open_menu = Some(Menu::Options);
@@ -236,7 +230,7 @@ pub fn show_device_list(
     let old_style = p.style().clone();
     p.style.item_size.x *= 0.5;
 
-    p.start_placing(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::Y);
+    p.start(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::Y);
 
     for (idx, chip) in chips.iter().enumerate() {
         if p.button(None, &chip.name).clicked {
@@ -254,7 +248,7 @@ pub fn show_device_preview_header(
     cancel: &mut bool,
 ) {
     let mut p = MenuPainter::new(bounds, p);
-    p.start_placing(pos, Align2::BOTTOM_CENTER, Align2::MIN, Vec2::X);
+    p.start(pos, Align2::BOTTOM_CENTER, Align2::MIN, Vec2::X);
 
     if p.image_button(None, &MAIN_ATLAS["confirm_icon"]).clicked {
         *confirm = true;
@@ -290,7 +284,6 @@ pub struct App {
     pub chips_in_hand: Vec<u32>,
     pub ui_state: UiState,
     pub place_chips_pos: Vec2,
-    pub layouts_dirty: bool,
     pub start_wire: Option<NodeAddr>,
 }
 impl App {
@@ -317,7 +310,6 @@ impl App {
         renderer.update_size(&gpu, win_size.as_vec2());
         renderer.update_global_transform(&gpu, Default::default());
         renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
-        self.layouts_dirty = true;
         self.place_chips_pos = win_size.as_vec2() * 0.5;
         self.scene
             .init(Rect::from_min_size(Vec2::ZERO, win_size.as_vec2()));
@@ -343,7 +335,6 @@ impl App {
                 renderer.update_size(gpu, gpu.surface_size().as_vec2());
             }
         }
-        self.layouts_dirty = true;
     }
 
     pub fn draw_frame(
@@ -373,15 +364,6 @@ impl App {
             self.sim.clear();
             self.ui_state.open_menu = None;
         }
-        if self.layouts_dirty {
-            self.options_menu = Default::default();
-            self.info_menu = Default::default();
-            self.save_menu = Default::default();
-            self.overlay_ui = Default::default();
-            self.device_list_ui = Default::default();
-            self.place_chips_ui = Default::default();
-        }
-        self.layouts_dirty = false;
 
         let show_place_devices_ui = self.chips_in_hand.len() > 0;
 
@@ -507,7 +489,6 @@ impl App {
                     &mut painter,
                     content_rect,
                     &mut self.ui_state,
-                    &mut self.layouts_dirty,
                 );
             }
             Some(Menu::Info) => {
