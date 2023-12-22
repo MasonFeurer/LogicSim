@@ -5,7 +5,7 @@ use crate::input::{InputState, PtrButton, TextInputState};
 use crate::Id;
 
 use crate::sim::save::{ChipSave, IoType, Library, SaveId};
-use crate::sim::scene::{Chip as SceneChip, Rotation, Scene};
+use crate::sim::scene::{Chip as SceneChip, NodeIdent, Rotation, Scene, Wire};
 use crate::sim::{Node, NodeAddr, Sim, Source, SourceTy};
 
 use glam::{UVec2, Vec2};
@@ -13,7 +13,7 @@ use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use serde::{Deserialize, Serialize};
 use wgpu::*;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum ChipTy {
     Sequential,
     Combinational,
@@ -222,6 +222,9 @@ pub fn show_options_menu(
     if p.button(None, "Info").clicked {
         state.open_menu = Some(Menu::Info);
     }
+    if p.button(None, "Library").clicked {
+        state.open_menu = Some(Menu::Library);
+    }
     p.cycle(None, &mut settings.ui_scale, &mut false);
     p.cycle(None, &mut settings.ui_theme, &mut false);
     if p.button(None, "Clear Scene").clicked {
@@ -269,20 +272,25 @@ pub fn show_library_menu(
         p.text_lg(None, &chip.name);
         p.seperator();
 
-        if p.button(None, "Delete").clicked {
-            out.push(Cmd::ChipDelete(idx));
-        }
-        if chip.scene.is_some() {
-            if p.button(None, "View").clicked {
-                out.push(Cmd::ChipView(idx));
-            }
+        if chip.builtin {
+            p.text(None, "Source: builtin");
         } else {
-            p.text(None, "No scene available");
+            p.text(None, "Source: user created");
         }
+
+        p.text(None, format!("Type: {}", chip.ty.label()));
         p.text(None, format!("L nodes: {}", chip.l_nodes.len()));
         p.text(None, format!("R nodes: {}", chip.r_nodes.len()));
         p.text(None, format!("Inner nodes: {}", chip.inner_nodes.len()));
-        if p.button(None, "All").clicked {
+
+        p.seperator();
+        if chip.scene.is_some() && p.button(None, "Edit").clicked {
+            out.push(Cmd::ChipView(idx));
+        }
+        if !chip.builtin && p.button(None, "Delete").clicked {
+            out.push(Cmd::ChipDelete(idx));
+        }
+        if p.button(None, "Back").clicked {
             state.library_sel = None;
         }
     } else {
@@ -293,6 +301,7 @@ pub fn show_library_menu(
                 state.library_sel = Some(idx);
             }
         }
+        p.seperator();
     }
     if p.button(None, "Close").clicked {
         state.open_menu = None;
@@ -315,7 +324,7 @@ pub fn show_overlay(
     if p.image_button(None, &MAIN_ATLAS["add_icon"]).clicked {
         state.open_menu = Some(Menu::Save);
     }
-    p.text(None, format!("fps: {fps}"));
+    p.text(None, format!("{fps}fps"));
 }
 
 pub fn show_device_list(
@@ -369,7 +378,7 @@ pub fn show_device_placer(
     let mut tmp_pos = placer.pos;
     for (stored_pos, chip_idx) in placer.chips.iter_mut() {
         let chip = &library.chips[*chip_idx as usize];
-        let mut preview = chip.preview(tmp_pos, Rotation::Rot0);
+        let mut preview = chip.preview(tmp_pos, Rotation::default());
 
         preview.pos.y += preview.size().y * 0.5;
         *stored_pos = preview.pos;
@@ -430,7 +439,7 @@ pub struct App {
 
     pub device_placer: DevicePlacer,
     pub ui_state: UiState,
-    pub start_wire: Option<NodeAddr>,
+    pub start_wire: Option<(NodeIdent, NodeAddr)>,
     pub commands: Vec<Cmd>,
 }
 impl App {
@@ -530,7 +539,9 @@ impl App {
                 Cmd::ScenePack => {
                     // self.scene.optimize();
                     let name = self.ui_state.chip_name.text.clone();
-                    let save = create_chip_save(name, &self.scenes[self.open_scene]);
+                    let ty = self.ui_state.chip_ty;
+                    let color = Color::GREEN;
+                    let save = create_chip_save(name, ty, color, &self.scenes[self.open_scene]);
                     self.library.add(&[save]);
                     self.scenes[self.open_scene].clear();
                     self.ui_state.open_menu = None;
@@ -541,7 +552,7 @@ impl App {
                     let scene = &mut self.scenes[self.open_scene];
                     for (pos, chip_idx) in &self.device_placer.chips {
                         let chip = &self.library.chips[*chip_idx as usize];
-                        place_chip(scene, None, chip, *pos, Rotation::Rot0);
+                        place_chip(scene, None, chip, *pos, Rotation::default());
                     }
                     self.device_placer.clear();
                 }
@@ -567,24 +578,27 @@ impl App {
 
         painter.set_transform(self.scenes[self.open_scene].transform);
         let scene_rs = self.scenes[self.open_scene].draw(&mut painter, &mut scene_hovered);
-        if let Some(addr) = scene_rs.clicked_output {
-            self.start_wire = Some(addr);
-            log::info!("Started wire connection");
+
+        // ---- Handle node clicks ----
+        if let Some(addr) = scene_rs.toggle_node_state {
+            let node = self.scenes[self.open_scene].sim.mut_node(addr);
+            node.set_state(!node.state());
         }
-        if let Some(addr) = scene_rs.clicked_input {
-            if let Some(src_addr) = self.start_wire {
-                log::info!("Placing wire");
-                let src = if addr == src_addr {
-                    Source::new_none()
-                } else {
-                    Source::new_copy(src_addr)
-                };
-                self.scenes[self.open_scene].sim.nodes[addr.0 as usize].set_source(src);
-                self.start_wire = None;
+        if let Some((ident, addr)) = scene_rs.clicked_node {
+            if let Some((ident2, addr2)) = self.start_wire {
+                if ident2 != ident {
+                    self.start_wire = None;
+
+                    let src = Source::new_copy(addr2);
+                    self.scenes[self.open_scene].sim.nodes[addr.0 as usize].set_source(src);
+                    self.scenes[self.open_scene].wires.push(Wire {
+                        input: ident2,
+                        output: ident,
+                        anchors: vec![],
+                    });
+                }
             } else {
-                log::info!("Toggling input");
-                let state = self.scenes[self.open_scene].sim.nodes[addr.0 as usize].state();
-                self.scenes[self.open_scene].sim.nodes[addr.0 as usize].set_state(!state);
+                self.start_wire = Some((ident, addr));
             }
         }
 
@@ -676,7 +690,7 @@ impl App {
     }
 }
 
-pub fn create_chip_save(name: String, scene: &Scene) -> ChipSave {
+pub fn create_chip_save(name: String, ty: ChipTy, color: Color, scene: &Scene) -> ChipSave {
     let region_size = scene.sim.next_region;
     let l_nodes = scene
         .l_nodes
@@ -699,6 +713,9 @@ pub fn create_chip_save(name: String, scene: &Scene) -> ChipSave {
     ChipSave {
         region_size,
         name,
+        ty,
+        color,
+        builtin: false,
         scene: Some(scene.clone()),
         l_nodes,
         r_nodes,
@@ -711,7 +728,7 @@ pub fn place_chip(
     save_id: Option<SaveId>,
     save: &ChipSave,
     pos: Vec2,
-    orientation: Rotation,
+    rotation: Rotation,
 ) {
     let mut l_nodes = vec![];
     let mut r_nodes = vec![];
@@ -745,7 +762,7 @@ pub fn place_chip(
         region,
         pos,
         name: save.name.clone(),
-        orientation,
+        rotation,
         save: save_id,
         l_nodes,
         r_nodes,

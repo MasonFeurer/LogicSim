@@ -1,3 +1,5 @@
+use crate::app::ChipTy;
+use crate::graphics::Color;
 use crate::sim::{self, scene, NodeRegion, TruthTable};
 use glam::Vec2;
 use serde::{Deserialize, Serialize};
@@ -31,6 +33,9 @@ impl Default for Library {
         };
         let and = ChipSave {
             region_size: 3,
+            ty: ChipTy::Combinational,
+            builtin: true,
+            color: Color::WHITE,
             name: "And".into(),
             scene: None,
             l_nodes: vec![
@@ -53,6 +58,9 @@ impl Default for Library {
         };
         let not = ChipSave {
             region_size: 2,
+            ty: ChipTy::Combinational,
+            builtin: true,
+            color: Color::BLACK,
             name: "Not".into(),
             scene: None,
             l_nodes: vec![("in".into(), sim::NodeAddr(0), sim::Node::ZERO)],
@@ -90,6 +98,9 @@ impl Library {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChipSave {
     pub region_size: u32,
+    pub ty: ChipTy,
+    pub color: Color,
+    pub builtin: bool,
     pub name: String,
     pub scene: Option<scene::Scene>,
     pub l_nodes: Vec<(String, sim::NodeAddr, sim::Node)>,
@@ -97,7 +108,7 @@ pub struct ChipSave {
     pub inner_nodes: Vec<(sim::NodeAddr, sim::Node)>,
 }
 impl ChipSave {
-    pub fn preview(&self, pos: Vec2, orientation: scene::Rotation) -> scene::Chip {
+    pub fn preview(&self, pos: Vec2, rotation: scene::Rotation) -> scene::Chip {
         fn io_ty(node: &sim::Node) -> IoType {
             match node.source().ty() {
                 sim::SourceTy::None => IoType::Input,
@@ -120,7 +131,7 @@ impl ChipSave {
             region: NodeRegion::default(),
             pos,
             name: self.name.clone(),
-            orientation,
+            rotation,
             save: None,
             l_nodes,
             r_nodes,

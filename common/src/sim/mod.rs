@@ -253,6 +253,10 @@ impl Sim {
             .copied()
             .unwrap_or(Node::ZERO)
     }
+    #[inline(always)]
+    pub fn mut_node(&mut self, addr: NodeAddr) -> &mut Node {
+        self.nodes.get_mut(addr.0 as usize).unwrap()
+    }
 
     pub fn alloc_node(&mut self) -> NodeAddr {
         self.alloc_region(1).min

@@ -13,7 +13,7 @@ use glam::{vec2, vec4, Vec2, Vec4};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Color(pub u32);
 impl Color {
     pub const WHITE: Self = Self(0xFFFFFFFF);

@@ -290,7 +290,7 @@ impl<'i, 'm, 'x, 'y> std::ops::Drop for MenuPainter<'i, 'm, 'x, 'y> {
         // If the placer is dirty, we should remove all the generated vertices and indices from the model.
         if self.painter.placer.dirty {
             self.painter.model.vertices.truncate(self.start.0 as usize);
-            self.painter.model.indices.truncate(self.start.0 as usize);
+            self.painter.model.indices.truncate(self.start.1 as usize);
         }
     }
 }
