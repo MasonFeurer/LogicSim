@@ -117,12 +117,10 @@ impl ExternalNodes {
             p.model_mut().rect(handle_bounds, &MAIN_ATLAS.white, handle);
         }
 
-        p.input_mut()
-            .update_drag(id, t * handle_bounds, self.pos, PtrButton::LEFT);
-        if let Some(drag) = p.input().get_drag_full(id) {
-            let offset = drag.press_pos - t * drag.anchor;
-            self.pos = t.inv() * (p.input().ptr_pos() - offset);
+        if let Some(new_pos) = p.interact_drag(id, handle_bounds, self.pos, PtrButton::LEFT) {
+            self.pos = new_pos;
         }
+
         // Draw Nodes
         let mut y = self.pos.y + w * 0.5 + NODE_SPACING;
         let x = self.pos.x + w * 0.5;
@@ -180,6 +178,7 @@ pub struct SceneOutput {
     pub clicked_output: Option<NodeAddr>,
     pub clicked_input: Option<NodeAddr>,
     pub clicked_chip: Option<SceneId>,
+    pub rclicked_chip: Option<SceneId>,
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
@@ -237,11 +236,8 @@ impl Scene {
             }
 
             let anchor = device.get_anchor();
-            p.input_mut()
-                .update_drag(*id, self.transform * bounds, anchor, PtrButton::LEFT);
-            if let Some(drag) = p.input().get_drag_full(*id) {
-                let offset = drag.press_pos - self.transform * drag.anchor;
-                device.move_anchor(self.transform.inv() * (p.input().ptr_pos() - offset));
+            if let Some(new_pos) = p.interact_drag(*id, bounds, anchor, PtrButton::LEFT) {
+                device.move_anchor(new_pos);
             }
             device.draw(Some(*id), p, &mut self.sim, &mut out);
         }
@@ -334,8 +330,9 @@ pub struct Chip {
     pub region: NodeRegion,
     pub pos: Vec2,
     pub name: String,
+    pub color: Color,
     pub rotation: Rotation,
-    pub save: Option<save::SaveId>,
+    pub save: Option<usize>,
     pub l_nodes: Vec<(NodeAddr, String, save::IoType)>,
     pub r_nodes: Vec<(NodeAddr, String, save::IoType)>,
     pub inner_nodes: Vec<NodeAddr>,
@@ -392,22 +389,24 @@ impl Chip {
         sim: &mut Sim,
         out: &mut SceneOutput,
     ) {
-        // TODO fit text better
         let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
 
         let size = self.size();
         let rect = Rect::from_center_size(self.pos, size);
 
         let chip_color = match id {
-            Some(_) => ui.style().item_color,
-            None => Color::shade(125).into(),
+            Some(_) => self.color,
+            None => self.color.darken(120),
         };
         ui.model_mut()
-            .rounded_rect(rect, 3.0, 20, &MAIN_ATLAS.white, chip_color);
+            .rounded_rect(rect, 10.0, 20, &MAIN_ATLAS.white, chip_color.into());
 
         let chip_int = ui.interact(rect);
         if chip_int.clicked {
             out.clicked_chip = id;
+        }
+        if chip_int.rclicked {
+            out.rclicked_chip = id;
         }
 
         let mut y = rect.min.y + NODE_SPACING + NODE_SIZE * 0.5;
@@ -463,9 +462,12 @@ impl Chip {
 
             y += NODE_SIZE + NODE_SPACING;
         }
-        let text_size = ui.text_size(&self.name, size.y * 0.5);
+        let text_size = ui.text_size(&self.name, NODE_SIZE * 0.5);
         ui.place_text(
-            Rect::from_center_size(self.pos, size * 0.5),
+            Rect::from_center_size(
+                vec2(self.pos.x, self.pos.y - size.y * 0.5 - text_size.y * 0.5),
+                text_size,
+            ),
             (&self.name, text_size),
             ui.style().text_color,
             Align2::CENTER,

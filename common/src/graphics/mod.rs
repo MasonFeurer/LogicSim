@@ -71,6 +71,15 @@ impl Color {
             self.a() as f32,
         ) / 255.0
     }
+
+    pub fn darken(self, v: u8) -> Self {
+        Self::rgba(
+            self.r().saturating_sub(v),
+            self.g().saturating_sub(v),
+            self.b().saturating_sub(v),
+            self.a(),
+        )
+    }
 }
 
 #[derive(Clone, Copy)]

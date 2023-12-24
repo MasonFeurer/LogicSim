@@ -172,10 +172,13 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 }
 
                 ctx.last_frame_time = SystemTime::now();
-                match ctx
-                    .app
-                    .draw_frame(&mut ctx.input, content_rect, &mut ctx.text_input, ctx.fps)
-                {
+                match ctx.app.draw_frame(
+                    &mut ctx.input,
+                    content_rect,
+                    &mut ctx.text_input,
+                    ctx.fps,
+                    &mut Default::default(),
+                ) {
                     Err(err) => log::warn!("Failed to draw frame: {err:?}"),
                     Ok(_) => {}
                 }

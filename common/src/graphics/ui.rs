@@ -307,6 +307,7 @@ impl<'i, 'm, 'x, 'y> std::ops::DerefMut for MenuPainter<'i, 'm, 'x, 'y> {
 }
 
 pub struct Painter<'i, 'm> {
+    pub covered: bool,
     pub transform: Transform,
     pub placer: Placer,
     pub style: Style,
@@ -318,6 +319,7 @@ pub struct Painter<'i, 'm> {
 impl<'i, 'm> Painter<'i, 'm> {
     pub fn new(style: Style, input: &'i mut InputState, model: &'m mut Model) -> Self {
         Self {
+            covered: false,
             transform: Transform::default(),
             placer: Placer::default(),
             style,
@@ -368,7 +370,32 @@ impl<'i, 'm> Painter<'i, 'm> {
         self.transform = t;
     }
 
+    pub fn interact_drag(
+        &mut self,
+        id: Id,
+        bounds: Rect,
+        anchor: Vec2,
+        button: PtrButton,
+    ) -> Option<Vec2> {
+        if self.covered {
+            return None;
+        }
+        self.input
+            .update_drag(id, self.transform * bounds, anchor, button);
+        if let Some(drag) = self.input.get_drag_full(id) {
+            let offset = drag.press_pos - self.transform * drag.anchor;
+            Some(self.transform.inv() * (self.input.ptr_pos() - offset))
+        } else {
+            None
+        }
+    }
+
     pub fn interact(&mut self, shape: Rect) -> Interaction {
+        if self.covered {
+            let mut rs = Interaction::default();
+            rs.color = self.style.item_color;
+            return rs;
+        }
         let shape = self.transform * shape;
         let mut rs = Interaction::default();
         rs.hovered = self.input.area_hovered(shape);
@@ -456,15 +483,15 @@ impl<'i, 'm> Painter<'i, 'm> {
         let shape = shape.unwrap_or_else(|| self.placer.next(self.style.item_size));
         text_edit(shape, hint, field, self)
     }
-    pub fn cycle(
+    pub fn cycle<S: CycleState>(
         &mut self,
         shape: Option<Rect>,
-        state: &mut impl CycleState,
+        state: &mut S,
         changed: &mut bool,
     ) -> Interaction {
         let int = self.button(shape, state.label());
         if int.clicked {
-            state.advance();
+            *state = S::from_u8(state.as_u8().wrapping_add(1)).unwrap_or(S::from_u8(0).unwrap());
             *changed = true;
         }
         int
@@ -545,7 +572,10 @@ impl<'i, 'm> Painter<'i, 'm> {
 }
 
 pub trait CycleState {
-    fn advance(&mut self);
+    fn from_u8(b: u8) -> Option<Self>
+    where
+        Self: Sized;
+    fn as_u8(&self) -> u8;
     fn label(&self) -> &'static str;
 }
 
