@@ -1,0 +1,23 @@
+[package]
+name = "logisim-web"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wgpu = { version = "0.18", features = ["webgl"] }
+
+logisim-common = { path = "../common" }
+winit = { version = "0.29", features = ["rwh_05"] }
+rfd = "0.12"
+bincode = "1.3"
+web-sys = { version = "^0.3", features = ["Navigator", "Window", "HtmlCanvasElement"] }
+tracing-wasm = "0.2"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "^0.4"
+console_error_panic_hook = "0.1.7"
+web-time = "0.2.4"
+console_log = { version = "0.2", features = ["color"] }
+# getrandom = { version = "^0.2.8", features = ["js"] }

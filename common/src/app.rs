@@ -573,7 +573,8 @@ impl App {
         let gpu = Gpu::new(&self.instance, &window, win_size).await.unwrap();
         gpu.configure_surface();
 
-        let mut renderer = Renderer::new(&gpu);
+        // let mut renderer = Renderer::new(&gpu);
+        let mut renderer = Renderer::new_minimal(&gpu);
         renderer.update_size(&gpu, win_size.as_vec2());
         renderer.update_global_transform(&gpu, Default::default());
         renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
@@ -597,9 +598,10 @@ impl App {
             gpu.configure_surface();
 
             if let Some(renderer) = &mut self.renderer {
-                renderer.update_size(gpu, gpu.surface_size().as_vec2());
+                renderer.update_size(gpu, size.as_vec2());
             }
         }
+        self.device_placer.pos = self.scene().transform.inv() * (size.as_vec2() * 0.5);
     }
 
     pub fn draw_frame(

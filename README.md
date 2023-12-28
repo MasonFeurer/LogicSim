@@ -26,10 +26,51 @@ sudo apt install librust-gdk-dev
 ```
 
 #### Web
-There are plans to integrate the app for the web, but there has currently been no progress towards this.
+To compile for the web you will need:
+- the Rust wasm32 target installed
+- wasm-bindgen
+```sh
+rustup target add wasm-unkown-unkown
+cargo install wasm-bindgen
+```
+
+Then, compile the app with:
+```sh
+git clone "https://github.com/MasonFeurer/Logisim.git"
+cd Logisim/web
+RUSTFLAGS='--cfg=web_sys_unstable_apis' cargo b --release --target wasm32-unknown-unknown
+wasm-bindgen --out-dir site --no-modules --no-typescript ../target/wasm32-unknown-unknown/release/logisim_web.wasm
+```
+This will place a `logisim_web_bg.wasm` and a `logisim_web.js` in the `web/site` directory.
+You can then use these in your `index.html` with:
+```html
+<canvas id="app"></canvas>
+<script src="logisim_web.js" type="text/javascript"></script>
+<style>
+	html,
+	body {
+		overflow: hidden;
+		margin: 0 !important;
+		padding: 0 !important;
+		height: 100%;
+		width: 100%
+	}
+	canvas {
+		margin-right: auto;
+		margin-left: auto;
+		display: block;
+		position: absolute;
+	}
+</style>
+<script>
+	wasm_bindgen("./logisim_web_bg.wasm")
+		.then(function() { wasm_bindgen.main_web("app") })
+		.catch(function(err) { console.error(err) });
+</script>
+```
 
 #### Android
-- Take a look at `android/setup-compile.sh` to see what needs to be done before the android integration can be built.
+- Take a look at `android/setup-compile.md` to see what needs to be done before the android integration can be built.
 
 To compile the app into an APK:
 ```sh

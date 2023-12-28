@@ -4,9 +4,9 @@ use wgpu::*;
 
 #[derive(Debug)]
 pub enum GpuError {
-    CreateSurfaceError(CreateSurfaceError),
+    CreateSurfaceError(String),
     RequestAdapterError,
-    RequestDeviceError,
+    RequestDeviceError(String),
 }
 
 pub struct Gpu {
@@ -22,7 +22,7 @@ impl Gpu {
         size: UVec2,
     ) -> Result<Self, GpuError> {
         let surface = unsafe { instance.create_surface(window) }
-            .map_err(|e| GpuError::CreateSurfaceError(e))?;
+            .map_err(|e| GpuError::CreateSurfaceError(e.to_string()))?;
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::default(),
@@ -37,8 +37,8 @@ impl Gpu {
             .expect("Surface should have connfig for this adapter");
 
         let mut limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
-        limits.max_storage_buffers_per_shader_stage = 1;
-        limits.max_storage_buffer_binding_size = 128 << 20;
+        // limits.max_storage_buffers_per_shader_stage = 1;
+        // limits.max_storage_buffer_binding_size = 128 << 20;
 
         // Create the logical device and command queue
         let (device, queue) = adapter
@@ -51,7 +51,7 @@ impl Gpu {
                 None,
             )
             .await
-            .map_err(|_| GpuError::RequestDeviceError)?;
+            .map_err(|e| GpuError::RequestDeviceError(e.to_string()))?;
         Ok(Self {
             device,
             queue,

@@ -34,8 +34,8 @@ cd cmdline-tools/latest/bin
 
 https://dl.google.com/android/repository/android-ndk-r26b-linux.zip
 
-# Set Enviornemtn Variables
-Add the following to the end of `~/.bashrc`.
+# Set Enviornment Variables
+Add the following to the end of `~/.bashrc` (or `~/.zshenv` if on MacOS).
 The rest of the tutorial will use the enviornment variables.
 ```sh
 export ANDROID_HOME="$HOME/android-sdk"
@@ -52,6 +52,8 @@ source ~/.bashrc
 sudo apt install openjdk-17-jdk
 sudo apt install openjdk-17-jre
 ```
+
+FIXME: Have reader run `java --version` instead and point them to Java download page
 
 # Setup rust for android
 ```sh

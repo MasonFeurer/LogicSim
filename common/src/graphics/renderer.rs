@@ -5,6 +5,7 @@ use glam::Vec2;
 use wgpu::*;
 
 static SHADER_SOURCE: &str = include_str!("../../include/shader.wgsl");
+static MINIMAL_SHADER_SOURCE: &str = include_str!("../../include/shader_minimal.wgsl");
 
 pub struct Uniform<T> {
     buffer: Buffer,
@@ -70,9 +71,127 @@ pub struct Renderer {
 
     pub atlas: Atlas,
     pub locals_buf: Uniform<Locals>,
-    pub nodes_buf: NodesBuffer,
+    pub nodes_buf: Option<NodesBuffer>,
 }
 impl Renderer {
+    /// Creates a renderer that avoids using Storage Buffers as to support as many backends as possible.
+    pub fn new_minimal(gpu: &Gpu) -> Self {
+        let device = &gpu.device;
+
+        fn buffer_binding(binding: u32, buffer: &Buffer) -> BindGroupEntry {
+            BindGroupEntry {
+                binding,
+                resource: buffer.as_entire_binding(),
+            }
+        }
+
+        let locals = Locals::default();
+        let locals_buf = Uniform::new(device, "locals-buffer");
+        let atlas = Atlas::new(gpu);
+
+        let shader_module = device.create_shader_module(ShaderModuleDescriptor {
+            label: Some("shader-module"),
+            source: ShaderSource::Wgsl(MINIMAL_SHADER_SOURCE.into()),
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("bind-group-layout"),
+            entries: &[
+                BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: ShaderStages::VERTEX,
+                    ty: BindingType::Buffer {
+                        ty: BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Texture {
+                        sample_type: TextureSampleType::Float { filterable: true },
+                        view_dimension: TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: ShaderStages::FRAGMENT,
+                    ty: BindingType::Sampler(SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+
+        let bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("bind-group"),
+            layout: &bind_group_layout,
+            entries: &[
+                buffer_binding(0, &locals_buf.buffer),
+                BindGroupEntry {
+                    binding: 2,
+                    resource: BindingResource::TextureView(&atlas.view),
+                },
+                BindGroupEntry {
+                    binding: 3,
+                    resource: BindingResource::Sampler(&atlas.sampler),
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("pipeline-layout"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: VertexState {
+                module: &shader_module,
+                entry_point: "vs_main",
+                buffers: &[VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: VertexStepMode::Vertex,
+                    attributes: &VERTEX_ATTRIBUTES,
+                }],
+            },
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: FrontFace::Cw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(FragmentState {
+                module: &shader_module,
+                entry_point: "fs_main",
+                targets: &[Some(ColorTargetState {
+                    format: TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+
+        Self {
+            pipeline,
+            bind_group,
+            locals,
+            atlas,
+            nodes_buf: None,
+            locals_buf,
+        }
+    }
     pub fn new(gpu: &Gpu) -> Self {
         let device = &gpu.device;
 
@@ -198,7 +317,7 @@ impl Renderer {
             bind_group,
             locals,
             atlas,
-            nodes_buf,
+            nodes_buf: Some(nodes_buf),
             locals_buf,
         }
     }
@@ -237,9 +356,9 @@ impl Renderer {
                 b: color.b() as f64 / 255.0,
                 a: color.a() as f64 / 255.0,
             };
-            (LoadOp::Clear(color), true)
+            (LoadOp::Clear(color), StoreOp::Store)
         } else {
-            (LoadOp::Load, true)
+            (LoadOp::Load, StoreOp::Store)
         };
 
         let mut pass = cmd_encoder.begin_render_pass(&RenderPassDescriptor {
@@ -250,6 +369,8 @@ impl Renderer {
                 ops: Operations { load, store },
             })],
             depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
         });
         pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.bind_group, &[]);

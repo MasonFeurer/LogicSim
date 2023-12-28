@@ -10,6 +10,7 @@ pub use graphics::*;
 pub use sim::*;
 
 pub use glam;
+pub use log;
 pub use wgpu;
 
 #[derive(Hash, Debug, Eq, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]

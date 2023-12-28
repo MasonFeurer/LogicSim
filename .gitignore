@@ -3,4 +3,6 @@
 /android/.gradle
 /android/app/build
 /android/app/src/main/jniLibs
+/web/target
+/web/site
 /README.html
