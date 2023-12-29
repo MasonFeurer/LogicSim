@@ -22,7 +22,3 @@ impl Id {
         Self(std::hash::Hasher::finish(&hasher))
     }
 }
-
-pub unsafe fn slice_as_byte_slice<T>(a: &[T]) -> &[u8] {
-    std::slice::from_raw_parts(a.as_ptr() as *const u8, a.len() * std::mem::size_of::<T>())
-}

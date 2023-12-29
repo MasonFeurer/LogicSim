@@ -8,10 +8,8 @@ pub use atlas::*;
 pub use model::*;
 pub use renderer::*;
 
-use crate::sim::NodeAddr;
 use glam::{vec2, vec4, Vec2, Vec4};
 use serde::{Deserialize, Serialize};
-use std::fmt;
 
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Color(pub u32);
@@ -27,7 +25,7 @@ impl Color {
     pub const MAGENTA: Self = Self(0xFF00FFFF);
     pub const CYAN: Self = Self(0x00FFFFFF);
 
-    pub const PINK: Self = Self(0xFF8383FF);
+    pub const PINK: Self = Self(0xFC88A3FF);
     pub const ORANGE: Self = Self(0xFF5F00FF);
     pub const MANGO: Self = Self(0xFF9900FF);
 
@@ -82,42 +80,13 @@ impl Color {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum ColorSrc {
-    Node(NodeAddr),
-    Set(Color),
-}
-impl ColorSrc {
-    pub fn should_ignore(self) -> bool {
-        match self {
-            Self::Set(c) => c.a() == 0,
-            _ => true,
-        }
-    }
-}
-impl Default for ColorSrc {
-    fn default() -> Self {
-        Self::Set(Color(0))
-    }
-}
-impl From<Color> for ColorSrc {
-    fn from(c: Color) -> Self {
-        Self::Set(c)
-    }
-}
-impl From<NodeAddr> for ColorSrc {
-    fn from(addr: NodeAddr) -> Self {
-        Self::Node(addr)
-    }
-}
-
 #[derive(Clone, Copy, Default)]
-pub struct Stroke<C> {
+pub struct Stroke {
     pub width: f32,
-    pub color: C,
+    pub color: Color,
 }
-impl<C> Stroke<C> {
-    pub fn new(width: f32, color: C) -> Self {
+impl Stroke {
+    pub fn new(width: f32, color: Color) -> Self {
         Self { width, color }
     }
 }
@@ -126,14 +95,6 @@ impl<C> Stroke<C> {
 pub struct Rect {
     pub min: Vec2,
     pub max: Vec2,
-}
-impl fmt::Debug for Rect {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Rect")
-            .field(&self.min)
-            .field(&self.max)
-            .finish()
-    }
 }
 impl Rect {
     pub const ZERO: Self = Self {

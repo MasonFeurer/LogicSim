@@ -1,51 +1,46 @@
-use super::{ColorSrc, Image, Rect, Transform, MAIN_ATLAS};
-use crate::slice_as_byte_slice;
+use super::{Color, Image, Rect, Transform, MAIN_ATLAS};
 use glam::{vec2, UVec2, Vec2};
 
 pub type Index = u32;
 
-pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32x2, 2 => Uint32, 3 => Uint32];
+pub const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x2, 1 => Uint32x2, 2 => Uint32];
 
 #[derive(Clone)]
 #[repr(C)]
 pub struct Vertex {
     pos: [f32; 2],
     uv: [u32; 2],
-    color_or_node: u32,
-    is_node_addr: u32,
+    color: u32,
 }
 impl Vertex {
-    pub fn new(pos: Vec2, uv: UVec2, color: ColorSrc) -> Self {
-        let (color_or_node, is_node_addr) = match color {
-            ColorSrc::Node(addr) => (addr.0, 1),
-            ColorSrc::Set(c) => (c.0, 0),
-        };
+    pub fn new(pos: Vec2, uv: UVec2, color: Color) -> Self {
         Self {
             pos: [pos.x, pos.y],
             uv: [uv.x, uv.y],
-            color_or_node,
-            is_node_addr,
+            color: color.0,
         }
     }
 }
 
-pub struct GpuModel {
-    pub transform: Transform,
+pub struct Model {
     pub bounds: Rect,
     pub vertex_buf: wgpu::Buffer,
     pub vertex_count: u32,
     pub index_buf: wgpu::Buffer,
     pub index_count: u32,
 }
-impl GpuModel {
+impl Model {
     pub fn new(
         device: &wgpu::Device,
-        transform: Transform,
         bounds: Rect,
         vertices: &[Vertex],
         indices: &[Index],
     ) -> Self {
+        pub unsafe fn slice_as_byte_slice<T>(a: &[T]) -> &[u8] {
+            std::slice::from_raw_parts(a.as_ptr() as *const u8, a.len() * std::mem::size_of::<T>())
+        }
+
         use wgpu::util::{BufferInitDescriptor, DeviceExt as _};
         let vertex_buf = BufferInitDescriptor {
             label: None,
@@ -59,7 +54,6 @@ impl GpuModel {
         };
         Self {
             bounds,
-            transform,
             vertex_buf: device.create_buffer_init(&vertex_buf),
             vertex_count: vertices.len() as u32,
             index_buf: device.create_buffer_init(&index_buf),
@@ -73,16 +67,17 @@ impl GpuModel {
 }
 
 #[derive(Default, Clone)]
-pub struct Model {
+pub struct ModelBuilder {
     pub transform: Transform,
     pub vertices: Vec<Vertex>,
     pub indices: Vec<Index>,
-    pub bounds: Rect,
+    bounds: Rect,
 }
-impl Model {
+impl ModelBuilder {
     pub fn clear(&mut self) {
         self.vertices.clear();
         self.indices.clear();
+        self.transform = Transform::default();
         self.bounds = Rect::default();
     }
 
@@ -112,7 +107,7 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn tri(&mut self, points: [Vec2; 3], tex: &Image, color: ColorSrc) {
+    pub fn tri(&mut self, points: [Vec2; 3], tex: &Image, color: Color) {
         self.raw_tri([
             Vertex::new(points[0], tex.uv_coords()[0], color),
             Vertex::new(points[1], tex.uv_coords()[1], color),
@@ -121,7 +116,7 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn quad(&mut self, points: [Vec2; 4], tex: &Image, color: ColorSrc) {
+    pub fn quad(&mut self, points: [Vec2; 4], tex: &Image, color: Color) {
         self.raw_quad([
             Vertex::new(points[0], tex.uv_coords()[0], color),
             Vertex::new(points[1], tex.uv_coords()[1], color),
@@ -131,7 +126,7 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn line(&mut self, points: [Vec2; 2], w: f32, tex: &Image, color: ColorSrc) {
+    pub fn line(&mut self, points: [Vec2; 2], w: f32, tex: &Image, color: Color) {
         let [a, b] = points;
         let p = (b - a).perp().normalize();
         let quad = [
@@ -143,7 +138,7 @@ impl Model {
         self.quad(quad, tex, color);
     }
 
-    pub fn curve(&mut self, points: [Vec2; 3], detail: u32, w: f32, color: ColorSrc) {
+    pub fn curve(&mut self, points: [Vec2; 3], detail: u32, w: f32, color: Color) {
         let [a, ctrl, b] = points;
         let mut prev_point = a;
         for step in 1..=detail {
@@ -154,7 +149,7 @@ impl Model {
         }
     }
 
-    pub fn cubic_curve(&mut self, points: [Vec2; 4], detail: u32, w: f32, color: ColorSrc) {
+    pub fn cubic_curve(&mut self, points: [Vec2; 4], detail: u32, w: f32, color: Color) {
         let [a, ctrl0, ctrl1, b] = points;
         let mut prev_point = a;
         for step in 1..=detail {
@@ -165,7 +160,7 @@ impl Model {
         }
     }
 
-    pub fn circle(&mut self, center: Vec2, r: f32, detail: u32, color: ColorSrc) {
+    pub fn circle(&mut self, center: Vec2, r: f32, detail: u32, color: Color) {
         let tex = &MAIN_ATLAS.white;
         let mut prev_pos = center + vec2(0.0f32.sin(), 0.0f32.cos()) * r;
         for step in 1..=detail {
@@ -176,7 +171,7 @@ impl Model {
         }
     }
 
-    pub fn circle_outline(&mut self, center: Vec2, r: f32, w: f32, detail: u32, color: ColorSrc) {
+    pub fn circle_outline(&mut self, center: Vec2, r: f32, w: f32, detail: u32, color: Color) {
         let tex = &MAIN_ATLAS.white;
         let mut prev_pos = center + vec2(0.0f32.sin(), 0.0f32.cos()) * r;
         for step in 1..=detail {
@@ -193,7 +188,7 @@ impl Model {
         r: f32,
         detail: u32,
         range: [f32; 2],
-        color: ColorSrc,
+        color: Color,
     ) {
         const TAU: f32 = std::f32::consts::TAU;
         let tex = &MAIN_ATLAS.white;
@@ -214,7 +209,7 @@ impl Model {
         w: f32,
         detail: u32,
         range: [f32; 2],
-        color: ColorSrc,
+        color: Color,
     ) {
         const TAU: f32 = std::f32::consts::TAU;
         let tex = &MAIN_ATLAS.white;
@@ -229,11 +224,11 @@ impl Model {
     }
 
     #[inline(always)]
-    pub fn rect(&mut self, rect: Rect, tex: &Image, color: ColorSrc) {
+    pub fn rect(&mut self, rect: Rect, tex: &Image, color: Color) {
         self.quad(rect.corners(), tex, color);
     }
 
-    pub fn rect_outline(&mut self, rect: Rect, w: f32, color: ColorSrc) {
+    pub fn rect_outline(&mut self, rect: Rect, w: f32, color: Color) {
         let tex = &MAIN_ATLAS.white;
         self.line([rect.tl(), rect.tr()], w, &tex, color);
         self.line([rect.tr(), rect.br()], w, &tex, color);
@@ -241,7 +236,7 @@ impl Model {
         self.line([rect.tl(), rect.bl()], w, &tex, color);
     }
 
-    pub fn rounded_rect(&mut self, rect: Rect, r: f32, detail: u32, tex: &Image, color: ColorSrc) {
+    pub fn rounded_rect(&mut self, rect: Rect, r: f32, detail: u32, tex: &Image, color: Color) {
         let (tl, tr, bl, br) = (rect.tl(), rect.tr(), rect.bl(), rect.br());
 
         let rect = Rect::from_min_max(rect.min + r, rect.max - r);
@@ -262,14 +257,7 @@ impl Model {
         self.circle_section(bl + vec2(r, -r), r, detail, [0.75, 1.0], color);
     }
 
-    pub fn rounded_rect_outline(
-        &mut self,
-        rect: Rect,
-        w: f32,
-        r: f32,
-        detail: u32,
-        color: ColorSrc,
-    ) {
+    pub fn rounded_rect_outline(&mut self, rect: Rect, w: f32, r: f32, detail: u32, color: Color) {
         let tex = &MAIN_ATLAS.white;
         let (tl, tr, bl, br) = (rect.tl(), rect.tr(), rect.bl(), rect.br());
 
@@ -283,14 +271,8 @@ impl Model {
         self.line([tl + Vec2::Y * r, bl - Vec2::Y * r], w, &tex, color);
     }
 
-    pub fn upload(&self, device: &wgpu::Device) -> GpuModel {
-        GpuModel::new(
-            device,
-            self.transform,
-            self.bounds,
-            &self.vertices,
-            &self.indices,
-        )
+    pub fn finish(&self, device: &wgpu::Device) -> Model {
+        Model::new(device, self.bounds, &self.vertices, &self.indices)
     }
 }
 

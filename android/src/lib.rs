@@ -530,10 +530,13 @@ fn draw_frame(state: &mut State) {
 
     // Draw frame
     let mut text_input = None;
-    match state
-        .app
-        .draw_frame(&mut state.input, content_rect, &mut text_input, state.fps)
-    {
+    match state.app.draw_frame(
+        &mut state.input,
+        content_rect,
+        &mut text_input,
+        state.fps,
+        &mut Default::default(),
+    ) {
         Err(err) => {
             log::warn!("Failed to draw frame: {err:?}");
             return;

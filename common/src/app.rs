@@ -1,6 +1,6 @@
 use crate::gpu::Gpu;
 use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style, TextField};
-use crate::graphics::{Color, Model, Rect, Renderer, Transform, MAIN_ATLAS};
+use crate::graphics::{Color, ModelBuilder, Rect, Renderer, Transform, MAIN_ATLAS};
 use crate::input::{InputState, PtrButton, TextInputState};
 use crate::Id;
 
@@ -21,6 +21,7 @@ pub enum ColorSel {
     White,
     Gray,
     Black,
+    Brown,
     Red,
     Orange,
     Yellow,
@@ -37,6 +38,7 @@ impl ColorSel {
             Self::White => Color::WHITE,
             Self::Gray => Color::shade(100),
             Self::Black => Color::BLACK,
+            Self::Brown => Color(0x3D2401FF),
             Self::Red => Color::RED,
             Self::Orange => Color::ORANGE,
             Self::Yellow => Color::YELLOW,
@@ -51,7 +53,7 @@ impl ColorSel {
 }
 impl CycleState for ColorSel {
     fn from_u8(b: u8) -> Option<Self> {
-        (b < 11).then(|| unsafe { std::mem::transmute(b) })
+        (b < 13).then(|| unsafe { std::mem::transmute(b) })
     }
     fn as_u8(&self) -> u8 {
         unsafe { std::mem::transmute(*self) }
@@ -61,6 +63,7 @@ impl CycleState for ColorSel {
             Self::White => "White",
             Self::Gray => "Gray",
             Self::Black => "Black",
+            Self::Brown => "Brown",
             Self::Red => "Red",
             Self::Orange => "Orange",
             Self::Yellow => "Yellow",
@@ -574,7 +577,7 @@ impl App {
         gpu.configure_surface();
 
         // let mut renderer = Renderer::new(&gpu);
-        let mut renderer = Renderer::new_minimal(&gpu);
+        let mut renderer = Renderer::new(&gpu);
         renderer.update_size(&gpu, win_size.as_vec2());
         renderer.update_global_transform(&gpu, Default::default());
         renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
@@ -685,7 +688,7 @@ impl App {
         }
 
         // ------ Start Drawing ------
-        let mut model = Model::default();
+        let mut model = ModelBuilder::default();
         let mut painter = Painter::new(self.settings.create_style(), input, &mut model);
 
         // ---- Draw Scene ----
@@ -830,7 +833,7 @@ impl App {
         *text_input = painter.output.text_input.clone();
         let bg = Some(painter.style().background);
         renderer
-            .render(gpu, bg, [&model.upload(&gpu.device)])
+            .render(gpu, bg, [&model.finish(&gpu.device)])
             .map_err(|e| format!("Failed to render to screen : {e:?}"))
     }
 }

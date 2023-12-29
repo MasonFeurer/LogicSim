@@ -258,7 +258,7 @@ const SANS_FF_FONT: &[Image] = &[
 ];
 
 pub static MAIN_ATLAS: StaticAtlasData = StaticAtlasData {
-    file: include_bytes!("./atlas3.png"),
+    file: include_bytes!("./atlas.png"),
     size: 512,
     // Just use the all-white texture for now.
     // Used if there isn't a texture with some requested name.

@@ -36,9 +36,7 @@ impl Gpu {
             .get_default_config(&adapter, size.x, size.y)
             .expect("Surface should have connfig for this adapter");
 
-        let mut limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
-        // limits.max_storage_buffers_per_shader_stage = 1;
-        // limits.max_storage_buffer_binding_size = 128 << 20;
+        let limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
 
         // Create the logical device and command queue
         let (device, queue) = adapter
@@ -66,14 +64,5 @@ impl Gpu {
 
     pub fn configure_surface(&self) {
         self.surface.configure(&self.device, &self.surface_config);
-    }
-
-    pub fn create_buffer(&self, size: u64, usage: BufferUsages) -> Buffer {
-        self.device.create_buffer(&BufferDescriptor {
-            label: None,
-            size,
-            usage,
-            mapped_at_creation: false,
-        })
     }
 }

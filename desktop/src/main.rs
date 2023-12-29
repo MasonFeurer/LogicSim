@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use logisim_common as logisim;
 
 use logisim::glam::vec2;

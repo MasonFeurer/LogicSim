@@ -1,4 +1,4 @@
-use super::{Color, ColorSrc, Image, Model, Rect, Transform, MAIN_ATLAS};
+use super::{Color, Image, ModelBuilder, Rect, Transform, MAIN_ATLAS};
 use crate::input::{InputState, Key, PtrButton, TextInputState};
 use crate::Id;
 use glam::{vec2, Vec2};
@@ -7,13 +7,13 @@ use glam::{vec2, Vec2};
 pub struct Style {
     pub text_size: f32,
     pub lg_text_size: f32,
-    pub text_color: ColorSrc,
+    pub text_color: Color,
     pub background: Color,
-    pub menu_background: ColorSrc,
+    pub menu_background: Color,
     pub item_size: Vec2,
-    pub item_color: ColorSrc,
-    pub item_hover_color: ColorSrc,
-    pub item_press_color: ColorSrc,
+    pub item_color: Color,
+    pub item_hover_color: Color,
+    pub item_press_color: Color,
     pub item_spacing: Vec2,
     pub seperator_w: f32,
     pub margin: Vec2,
@@ -145,7 +145,7 @@ pub struct Interaction {
     pub clicked: bool,
     pub rclicked: bool,
     pub clicked_elsewhere: bool,
-    pub color: ColorSrc,
+    pub color: Color,
     pub hovered: bool,
 }
 
@@ -312,12 +312,12 @@ pub struct Painter<'i, 'm> {
     pub placer: Placer,
     pub style: Style,
     pub input: &'i mut InputState,
-    pub model: &'m mut Model,
+    pub model: &'m mut ModelBuilder,
     pub output: PainterOutput,
     pub debug: bool,
 }
 impl<'i, 'm> Painter<'i, 'm> {
-    pub fn new(style: Style, input: &'i mut InputState, model: &'m mut Model) -> Self {
+    pub fn new(style: Style, input: &'i mut InputState, model: &'m mut ModelBuilder) -> Self {
         Self {
             covered: false,
             transform: Transform::default(),
@@ -352,7 +352,7 @@ impl<'i, 'm> Painter<'i, 'm> {
         self.placer.bounds
     }
 
-    pub fn model_mut(&mut self) -> &mut Model {
+    pub fn model_mut(&mut self) -> &mut ModelBuilder {
         self.model
     }
     pub fn style(&self) -> &Style {
@@ -521,7 +521,7 @@ impl<'i, 'm> Painter<'i, 'm> {
         &mut self,
         shape: Rect,
         (text, size2): (impl AsRef<str>, Vec2),
-        color: ColorSrc,
+        color: Color,
         align: Align2,
     ) {
         self.debug_shape(shape);

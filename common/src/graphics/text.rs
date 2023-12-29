@@ -1,16 +1,12 @@
-use super::{ColorSrc, Image, Model, Rect, StaticFont, MAIN_ATLAS};
+use super::{Color, Image, ModelBuilder, Rect, StaticFont, MAIN_ATLAS};
 use glam::{vec2, UVec2, Vec2};
 
 /// ```rs
-/// assert_eq!(split_first(""), None);
-/// assert_eq!(split_first("x"), Some(('x', "")));
-/// assert_eq!(split_first("ab"), Some(('a', "b")));
-/// assert_eq!(split_first("SomeLine"), Some(('S', "omeLine")));
-/// assert_eq!(split_first("😃😃😃"), Some(('😃', "😃😃")));
+/// assert_eq!(split_first("Hello!"), Some(('H', "ello!")));
+/// assert_eq!(split_first("😃🤣<-"), Some(('😃', "🤣<-")));
 /// assert_eq!(split_first("😃"), Some(('😃', "")));
-/// assert_eq!(split_first("😃xb"), Some(('😃', "xb")));
-/// assert_eq!(split_first("😃🤣xb"), Some(('😃', "🤣xb")));
-/// assert_eq!(split_first("a😃😃"), Some(('a', "😃😃")));
+/// assert_eq!(split_first("x"), Some(('x', "")));
+/// assert_eq!(split_first(""), None);
 /// ```
 fn split_first(s: &str) -> Option<(char, &str)> {
     if s.len() == 0 {
@@ -92,7 +88,7 @@ pub fn text_size(text: &str, scale: u32) -> Vec2 {
     vec2(max_x, scale as f32)
 }
 
-pub fn build_text(model: &mut Model, text: &str, scale: u32, start: Vec2, color: ColorSrc) {
+pub fn build_text(model: &mut ModelBuilder, text: &str, scale: u32, start: Vec2, color: Color) {
     for (_ch, _rect, img_rect, img) in layout_text(text, scale, start) {
         if let Some(img) = img {
             model.rect(img_rect, img, color);

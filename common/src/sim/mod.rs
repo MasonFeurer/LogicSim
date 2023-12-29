@@ -36,14 +36,6 @@ impl IntoIterator for NodeRange {
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 #[repr(C)]
 pub struct Node(u64);
-impl std::fmt::Debug for Node {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Node")
-            .field("state", &self.state())
-            .field("source", &self.source())
-            .finish()
-    }
-}
 impl Node {
     pub const ZERO: Self = Self(0);
 
@@ -108,15 +100,6 @@ impl SourceTy {
 
 #[derive(Clone, Copy)]
 pub struct Source(u64);
-impl std::fmt::Debug for Source {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self.ty() {
-            SourceTy::None => f.debug_tuple("Source::None").finish(),
-            SourceTy::Copy => f.debug_tuple("Source::Copy").field(&self.addr()).finish(),
-            SourceTy::Table => f.debug_tuple("Source::Table").field(&self.table()).finish(),
-        }
-    }
-}
 impl Source {
     #[inline(always)]
     pub const fn new_none() -> Self {

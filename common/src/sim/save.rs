@@ -90,11 +90,6 @@ impl Library {
     }
 }
 
-/// Note: A Node can only hava 1 source,
-/// so if a chip writes to one of its external pins than that pin can not
-/// be written to externally.
-
-/// A device can not save externally interactive components like lights or buttons.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ChipSave {
     pub region_size: u32,

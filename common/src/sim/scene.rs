@@ -38,9 +38,6 @@ pub enum NodeIdent {
     DeviceR(SceneId, u32),
 }
 
-// note: it's not unnaceptable for the app to allow you to end a wire connection on the output of a chip.
-// It should just not be very useful, like back-feeding a voltage into the output of a read breadboard component.
-// Because from the outside, a node doesn't exactly say weather it can be written to or not.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Wire {
     pub input: NodeIdent,
