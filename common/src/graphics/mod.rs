@@ -45,19 +45,19 @@ impl Color {
     }
 
     #[inline(always)]
-    pub fn r(self) -> u8 {
+    pub const fn r(self) -> u8 {
         ((self.0 & 0xFF000000) >> 24) as u8
     }
     #[inline(always)]
-    pub fn g(self) -> u8 {
+    pub const fn g(self) -> u8 {
         ((self.0 & 0x00FF0000) >> 16) as u8
     }
     #[inline(always)]
-    pub fn b(self) -> u8 {
+    pub const fn b(self) -> u8 {
         ((self.0 & 0x0000FF00) >> 8) as u8
     }
     #[inline(always)]
-    pub fn a(self) -> u8 {
+    pub const fn a(self) -> u8 {
         (self.0 & 0x000000FF) as u8
     }
 
@@ -77,6 +77,10 @@ impl Color {
             self.b().saturating_sub(v),
             self.a(),
         )
+    }
+
+    pub const fn inv(self) -> Self {
+        Self::rgba(255 - self.r(), 255 - self.g(), 255 - self.b(), self.a())
     }
 }
 

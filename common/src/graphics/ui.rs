@@ -311,10 +311,12 @@ pub struct Painter<'i, 'm> {
     pub transform: Transform,
     pub placer: Placer,
     pub style: Style,
+    pub original_style: Option<Style>,
     pub input: &'i mut InputState,
     pub model: &'m mut ModelBuilder,
     pub output: PainterOutput,
     pub debug: bool,
+    pub fit_button_text: bool,
 }
 impl<'i, 'm> Painter<'i, 'm> {
     pub fn new(style: Style, input: &'i mut InputState, model: &'m mut ModelBuilder) -> Self {
@@ -323,10 +325,12 @@ impl<'i, 'm> Painter<'i, 'm> {
             transform: Transform::default(),
             placer: Placer::default(),
             style,
+            original_style: None,
             input,
             model,
             output: PainterOutput::default(),
             debug: false,
+            fit_button_text: false,
         }
     }
 
@@ -358,6 +362,19 @@ impl<'i, 'm> Painter<'i, 'm> {
     pub fn style(&self) -> &Style {
         &self.style
     }
+    pub fn style_mut(&mut self) -> &mut Style {
+        &mut self.style
+    }
+    pub fn push_style(&mut self, f: impl FnOnce(&mut Style)) {
+        self.original_style = Some(self.style.clone());
+        f(&mut self.style);
+    }
+    pub fn pop_style(&mut self) {
+        if let Some(style) = self.original_style.take() {
+            self.style = style;
+        }
+    }
+
     pub fn input(&self) -> &InputState {
         self.input
     }
@@ -435,8 +452,13 @@ impl<'i, 'm> Painter<'i, 'm> {
         });
         self.debug_shape(shape);
         let int = self.interact(shape);
-        // TODO: use rouneded_rect
-        self.model.rect(shape, &MAIN_ATLAS.white, int.color);
+        self.model.rounded_rect(
+            shape,
+            shape.height() * 0.3,
+            20,
+            &MAIN_ATLAS.white,
+            int.color,
+        );
         let text_size = self.text_size(&label, self.style.text_size);
         self.place_text(
             shape,
@@ -471,7 +493,13 @@ impl<'i, 'm> Painter<'i, 'm> {
         let shape = shape.unwrap_or_else(|| self.placer.next(Vec2::splat(self.style.item_size.y)));
         self.debug_shape(shape);
         let int = self.interact(shape);
-        self.model.rect(shape, &MAIN_ATLAS.white, int.color);
+        self.model.rounded_rect(
+            shape,
+            shape.height() * 0.3,
+            20,
+            &MAIN_ATLAS.white,
+            int.color,
+        );
         self.model.rect(
             shape.shrink(self.style.button_margin),
             tex,
@@ -479,7 +507,7 @@ impl<'i, 'm> Painter<'i, 'm> {
         );
         int
     }
-    pub fn text_edit(&mut self, shape: Option<Rect>, hint: impl AsRef<str>, field: &mut TextField) {
+    pub fn text_edit(&mut self, shape: Option<Rect>, hint: impl AsRef<str>, field: TextFieldMut) {
         let shape = shape.unwrap_or_else(|| self.placer.next(self.style.item_size));
         text_edit(shape, hint, field, self)
     }
@@ -579,13 +607,49 @@ pub trait CycleState {
     fn label(&self) -> &'static str;
 }
 
+pub struct TextFieldMut<'a, 'b> {
+    pub text: &'a mut String,
+    pub focused: &'b mut bool,
+    pub cursor: &'b mut u32,
+}
+
+#[derive(Default)]
+pub struct TextFieldAttrs {
+    pub focused: bool,
+    pub cursor: u32,
+}
+impl<'b> TextFieldAttrs {
+    pub fn as_mut<'a>(&'b mut self, text: &'a mut String) -> TextFieldMut<'a, 'b> {
+        TextFieldMut {
+            text,
+            focused: &mut self.focused,
+            cursor: &mut self.cursor,
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct TextField {
     pub text: String,
     pub focused: bool,
     pub cursor: u32,
 }
-fn text_edit(shape: Rect, hint: impl AsRef<str>, field: &mut TextField, g: &mut Painter) {
+impl<'a> TextField {
+    pub fn as_mut(&'a mut self) -> TextFieldMut<'a, 'a> {
+        TextFieldMut {
+            text: &mut self.text,
+            focused: &mut self.focused,
+            cursor: &mut self.cursor,
+        }
+    }
+}
+
+fn text_edit(shape: Rect, hint: impl AsRef<str>, field_mut: TextFieldMut, g: &mut Painter) {
+    let mut field = TextField {
+        text: field_mut.text.clone(),
+        focused: *field_mut.focused,
+        cursor: *field_mut.cursor,
+    };
     let hint = hint.as_ref();
     let Interaction {
         color,
@@ -660,7 +724,7 @@ fn text_edit(shape: Rect, hint: impl AsRef<str>, field: &mut TextField, g: &mut 
     }
 
     let text_color = match field.text.is_empty() {
-        true => g.style.item_press_color,
+        true => g.style.text_color.darken(120),
         false => g.style.text_color,
     };
     let text: &str = match field.text.is_empty() {
@@ -672,4 +736,7 @@ fn text_edit(shape: Rect, hint: impl AsRef<str>, field: &mut TextField, g: &mut 
         let size = g.text_size(text, g.style.text_size);
         g.place_text(shape, (text, size), text_color, Align2::MIN);
     }
+    *field_mut.text = field.text.clone();
+    *field_mut.focused = field.focused;
+    *field_mut.cursor = field.cursor;
 }

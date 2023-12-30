@@ -1,7 +1,6 @@
-use super::{Atlas, Model, Transform, Vertex, VERTEX_ATTRIBUTES};
-
+use super::{Atlas, Model, Vertex, VERTEX_ATTRIBUTES};
 use crate::gpu::Gpu;
-use glam::Vec2;
+
 use wgpu::*;
 
 static SHADER_SOURCE: &str = include_str!("../../include/shader.wgsl");
@@ -38,10 +37,8 @@ impl<T> Uniform<T> {
 #[repr(C)]
 pub struct Locals {
     pub screen_size: [f32; 2],
-    pub global_offset: [f32; 2],
-    pub global_scale: f32,
     pub texture_size: u32,
-    _padding: [u32; 2],
+    _padding: [u32; 5],
 }
 
 pub struct Renderer {
@@ -164,19 +161,7 @@ impl Renderer {
         }
     }
 
-    pub fn update_size(&mut self, gpu: &Gpu, size: Vec2) {
-        self.locals.screen_size = size.into();
-        self.locals_buf.write(&gpu.queue, &self.locals);
-    }
-
-    pub fn update_atlas_size(&mut self, gpu: &Gpu, size: u32) {
-        self.locals.texture_size = size;
-        self.locals_buf.write(&gpu.queue, &self.locals);
-    }
-
-    pub fn update_global_transform(&mut self, gpu: &Gpu, t: Transform) {
-        self.locals.global_scale = t.scale;
-        self.locals.global_offset = t.offset.into();
+    pub fn upload_locals(&self, gpu: &Gpu) {
         self.locals_buf.write(&gpu.queue, &self.locals);
     }
 

@@ -72,7 +72,7 @@ fn main() {
     }
     if let Ok(bytes) = std::fs::read(&state.save_dirs.scene) {
         match bincode::deserialize(&bytes) {
-            Ok(scene) => *state.app.scene_mut() = scene,
+            Ok(scene) => state.app.scenes = scene,
             Err(err) => log::warn!("Failed to parse scene: {err:?}"),
         }
     }
@@ -129,7 +129,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
                 ),
             }
 
-            let scene = bincode::serialize(&state.app.scene()).unwrap();
+            let scene = bincode::serialize(&state.app.scenes).unwrap();
             match std::fs::write(&state.save_dirs.scene, &scene) {
                 Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
                 Err(err) => log::warn!(

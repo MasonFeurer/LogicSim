@@ -265,11 +265,14 @@ pub static MAIN_ATLAS: StaticAtlasData = StaticAtlasData {
     replacement_image: Image::new(2, 2, 1, 1, 0, 0),
     white: Image::new(2, 2, 1, 1, 0, 0),
     images: &[
-        ("add_icon", Image::new(1, 270, 27, 27, 0, 0)),
+        ("point_r", Image::new(135, 266, 28, 28, 0, 0)),
+        ("point_l", Image::new(163, 266, 28, 28, 0, 0)),
+        ("settings_icon", Image::new(190, 268, 26, 26, 0, 0)),
+        ("add_icon", Image::new(1, 268, 27, 27, 0, 0)),
         ("sub_icon", Image::new(29, 270, 25, 25, 0, 0)),
-        ("options_icon", Image::new(57, 270, 25, 25, 0, 0)),
-        ("cancel_icon", Image::new(85, 270, 25, 27, 0, 0)),
-        ("confirm_icon", Image::new(111, 270, 25, 27, 0, 0)),
+        ("scenes_icon", Image::new(57, 269, 27, 25, 0, 0)),
+        ("cancel_icon", Image::new(84, 268, 25, 27, 0, 0)),
+        ("confirm_icon", Image::new(110, 267, 25, 27, 0, 0)),
     ],
     fonts: &[
         (

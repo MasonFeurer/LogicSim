@@ -1,102 +1,19 @@
 use crate::gpu::Gpu;
-use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style, TextField};
+use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style, TextFieldAttrs};
 use crate::graphics::{Color, ModelBuilder, Rect, Renderer, Transform, MAIN_ATLAS};
-use crate::input::{InputState, PtrButton, TextInputState};
+use crate::input::{InputState, Key, PtrButton, TextInputState};
 use crate::Id;
 
-use crate::sim::save::{ChipSave, IoType, Library};
+use crate::sim::save::{ChipAttrs, ChipSave, IoType, ItemColor, Library};
 use crate::sim::scene::{
     Chip as SceneChip, Device as SceneDevice, NodeIdent, Rotation, Scene, SceneId, Wire,
 };
 use crate::sim::{Node, NodeAddr, Sim, Source, SourceTy};
 
-use glam::{UVec2, Vec2};
+use glam::{vec2, UVec2, Vec2};
 use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use serde::{Deserialize, Serialize};
 use wgpu::*;
-
-#[derive(Clone, Copy, Default)]
-pub enum ColorSel {
-    #[default]
-    White,
-    Gray,
-    Black,
-    Brown,
-    Red,
-    Orange,
-    Yellow,
-    Green,
-    Cyan,
-    Blue,
-    Purple,
-    Magenta,
-    Pink,
-}
-impl ColorSel {
-    fn as_color(self) -> Color {
-        match self {
-            Self::White => Color::WHITE,
-            Self::Gray => Color::shade(100),
-            Self::Black => Color::BLACK,
-            Self::Brown => Color(0x3D2401FF),
-            Self::Red => Color::RED,
-            Self::Orange => Color::ORANGE,
-            Self::Yellow => Color::YELLOW,
-            Self::Green => Color::GREEN,
-            Self::Cyan => Color::CYAN,
-            Self::Blue => Color::BLUE,
-            Self::Purple => Color::rgb(100, 0, 190),
-            Self::Magenta => Color::MAGENTA,
-            Self::Pink => Color::PINK,
-        }
-    }
-}
-impl CycleState for ColorSel {
-    fn from_u8(b: u8) -> Option<Self> {
-        (b < 13).then(|| unsafe { std::mem::transmute(b) })
-    }
-    fn as_u8(&self) -> u8 {
-        unsafe { std::mem::transmute(*self) }
-    }
-    fn label(&self) -> &'static str {
-        match *self {
-            Self::White => "White",
-            Self::Gray => "Gray",
-            Self::Black => "Black",
-            Self::Brown => "Brown",
-            Self::Red => "Red",
-            Self::Orange => "Orange",
-            Self::Yellow => "Yellow",
-            Self::Green => "Green",
-            Self::Cyan => "Cyan",
-            Self::Blue => "Blue",
-            Self::Purple => "Purple",
-            Self::Magenta => "Magenta",
-            Self::Pink => "Pink",
-        }
-    }
-}
-
-#[derive(Clone, Copy, Serialize, Deserialize, Default)]
-pub enum ChipTy {
-    #[default]
-    Sequential,
-    Combinational,
-}
-impl CycleState for ChipTy {
-    fn from_u8(b: u8) -> Option<Self> {
-        (b < 2).then(|| unsafe { std::mem::transmute(b) })
-    }
-    fn as_u8(&self) -> u8 {
-        unsafe { std::mem::transmute(*self) }
-    }
-    fn label(&self) -> &'static str {
-        match *self {
-            Self::Sequential => "Sequential",
-            Self::Combinational => "Combinational",
-        }
-    }
-}
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum UiTheme {
@@ -209,8 +126,9 @@ impl Settings {
 #[derive(Clone, Copy)]
 pub enum Cmd {
     None,
+    SceneSel(usize),
     SceneClear,
-    SceneDel,
+    SceneDel(usize),
     SceneNew,
     ScenePack,
     PlacerAdd(usize),
@@ -229,19 +147,26 @@ pub enum Menu {
     Info,
     Save,
     Library,
+    Scenes,
 }
 
 #[derive(Default)]
 pub struct UiState {
-    chip_ty: ChipTy,
-    chip_name: TextField,
+    save_name_field: TextFieldAttrs,
     chip_context: Option<SceneId>,
-    chip_color: ColorSel,
     library_sel: Option<usize>,
     open_menu: Option<Menu>,
+    device_list_filter: Option<ItemColor>,
+    device_list_closed: bool,
+    ui_debugging: bool,
 }
 
 pub fn show_info_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &mut UiState) {
+    if p.input().area_outside_clicked(*bounds, PtrButton::LEFT) {
+        state.open_menu = None;
+        return;
+    }
+
     let mut p = MenuPainter::new(bounds, p);
     p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
     p.text_lg(None, "Logisim");
@@ -272,10 +197,15 @@ pub fn show_options_menu(
     external_data: bool,
     out: &mut Vec<Cmd>,
 ) {
+    if p.input().area_outside_clicked(*bounds, PtrButton::LEFT) {
+        state.open_menu = None;
+        return;
+    }
+
     let mut p = MenuPainter::new(bounds, p);
     p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
-    p.text_lg(None, "Options");
+    p.text_lg(None, "Settings");
     p.seperator();
     if p.button(None, "Info").clicked {
         state.open_menu = Some(Menu::Info);
@@ -291,10 +221,6 @@ pub fn show_options_menu(
     if external_data && p.button(None, "Import Data").clicked {
         out.push(Cmd::ImportData);
     }
-    if p.button(None, "Clear Scene").clicked {
-        out.push(Cmd::SceneClear);
-        state.open_menu = None;
-    }
     if p.button(None, "Done").clicked {
         state.open_menu = None;
     }
@@ -305,29 +231,84 @@ pub fn show_save_menu(
     p: &mut Painter,
     screen: Rect,
     state: &mut UiState,
+    attrs: &mut ChipAttrs,
     out: &mut Vec<Cmd>,
 ) {
+    if p.input().area_outside_clicked(*bounds, PtrButton::LEFT) {
+        state.open_menu = None;
+        return;
+    }
+
     let mut p = MenuPainter::new(bounds, p);
     p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
     p.text_lg(None, "Save to Chip");
     p.seperator();
-    p.text_edit(None, "Name", &mut state.chip_name);
+    p.text_edit(None, "Name", state.save_name_field.as_mut(&mut attrs.name));
 
-    // Ideal API:
-    // p.push_style(|style| style.text_color = state.chip_color.as_color());
-    let old_style = p.style.clone();
-    p.style.text_color = state.chip_color.as_color().into();
-    p.cycle(None, &mut state.chip_color, &mut false);
-    p.style = old_style;
-    // p.pop_style();
+    p.push_style(|style| style.text_color = attrs.color.as_color());
+    p.cycle(None, &mut attrs.color, &mut false);
+    p.pop_style();
 
-    p.cycle(None, &mut state.chip_ty, &mut false);
+    p.cycle(None, &mut attrs.logic, &mut false);
     if p.button(None, "Close").clicked {
         state.open_menu = None;
     }
     if p.button(None, "Create").clicked {
         out.push(Cmd::ScenePack)
+    }
+}
+
+pub fn show_scenes_menu(
+    bounds: &mut Rect,
+    p: &mut Painter,
+    screen: Rect,
+    state: &mut UiState,
+    out: &mut Vec<Cmd>,
+    scenes: &[Scene],
+    open_scene: usize,
+) {
+    if p.input().area_outside_clicked(*bounds, PtrButton::LEFT) {
+        state.open_menu = None;
+        return;
+    }
+
+    let mut p = MenuPainter::new(bounds, p);
+    p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
+
+    p.text_lg(None, "Scenes");
+    p.seperator();
+
+    for (idx, scene) in scenes.iter().enumerate() {
+        let label = match scene.save_attrs.name.is_empty() {
+            true => "unnamed",
+            false => &scene.save_attrs.name,
+        };
+        let label = match idx == open_scene {
+            true => format!("[{label}]"),
+            false => String::from(label),
+        };
+        let int = p.button(None, label);
+        if int.clicked {
+            out.push(Cmd::SceneSel(idx));
+            state.open_menu = None;
+        }
+        if int.rclicked {
+            out.push(Cmd::SceneDel(idx));
+        }
+    }
+
+    p.seperator();
+    if p.button(None, "New").clicked {
+        out.push(Cmd::SceneNew);
+        state.open_menu = None;
+    }
+    if p.button(None, "Clear").clicked {
+        out.push(Cmd::SceneClear);
+        state.open_menu = None;
+    }
+    if p.button(None, "Done").clicked {
+        state.open_menu = None;
     }
 }
 
@@ -339,11 +320,16 @@ pub fn show_library_menu(
     chips: &[ChipSave],
     out: &mut Vec<Cmd>,
 ) {
+    if p.input().area_outside_clicked(*bounds, PtrButton::LEFT) {
+        state.open_menu = None;
+        return;
+    }
+
     let mut p = MenuPainter::new(bounds, p);
     p.start(screen.center(), Align2::CENTER, Align2::CENTER, Vec2::Y);
 
     if let Some((idx, Some(chip))) = state.library_sel.map(|idx| (idx, chips.get(idx))) {
-        p.text_lg(None, &chip.name);
+        p.text_lg(None, &chip.attrs.name);
         p.seperator();
 
         if chip.builtin {
@@ -352,7 +338,7 @@ pub fn show_library_menu(
             p.text(None, "Source: user created");
         }
 
-        p.text(None, format!("Type: {}", chip.ty.label()));
+        p.text(None, format!("Logic: {}", chip.attrs.logic.label()));
         p.text(None, format!("L nodes: {}", chip.l_nodes.len()));
         p.text(None, format!("R nodes: {}", chip.r_nodes.len()));
         p.text(None, format!("Inner nodes: {}", chip.inner_nodes.len()));
@@ -371,7 +357,7 @@ pub fn show_library_menu(
         p.text_lg(None, "Library");
         p.seperator();
         for (idx, chip) in chips.into_iter().enumerate() {
-            if p.button(None, &chip.name).clicked {
+            if p.button(None, &chip.attrs.name).clicked {
                 state.library_sel = Some(idx);
             }
         }
@@ -388,16 +374,38 @@ pub fn show_overlay(
     screen: Rect,
     fps: u32,
     state: &mut UiState,
+    scene: &mut Scene,
 ) {
-    let mut p = MenuPainter::new(bounds, p);
-    p.start(screen.min, Align2::MIN, Align2::MIN, Vec2::X);
+    // Menu buttons (top-left)
+    let mut mp = MenuPainter::new(bounds, p);
+    mp.start(screen.min, Align2::MIN, Align2::MIN, Vec2::X);
 
-    if p.image_button(None, &MAIN_ATLAS["options_icon"]).clicked {
+    if mp.image_button(None, &MAIN_ATLAS["settings_icon"]).clicked {
         state.open_menu = Some(Menu::Options);
     }
-    if p.image_button(None, &MAIN_ATLAS["add_icon"]).clicked {
+    if mp.image_button(None, &MAIN_ATLAS["scenes_icon"]).clicked {
+        state.open_menu = Some(Menu::Scenes);
+    }
+    if mp.image_button(None, &MAIN_ATLAS["add_icon"]).clicked {
         state.open_menu = Some(Menu::Save);
     }
+
+    let name = if scene.save_attrs.name.is_empty() {
+        "unnamed"
+    } else {
+        &scene.save_attrs.name
+    };
+    mp.text(None, name);
+    std::mem::drop(mp);
+
+    // FPS Display (bottom-left, without menu)
+    p.placer.bounds = Rect::default();
+    p.start_placing(
+        screen.bl() - Vec2::Y * p.style().text_size,
+        Align2::TOP_LEFT,
+        Align2::MIN,
+        Vec2::X,
+    );
     p.text(None, format!("{fps}fps"));
 }
 
@@ -406,17 +414,73 @@ pub fn show_device_list(
     p: &mut Painter,
     screen: Rect,
     state: &mut UiState,
-    chips: &[ChipSave],
+    library: &Library,
     out: &mut Vec<Cmd>,
 ) {
+    if p.input().key_pressed(Key::F4) {
+        state.device_list_closed ^= true;
+    }
+    if state.device_list_closed {
+        *bounds = Rect::default();
+        let size = Vec2::splat(p.style().item_size.y);
+        let bounds = Rect::from_min_size(screen.tr() - vec2(size.x, 0.0), size);
+        if p.image_button(Some(bounds), &MAIN_ATLAS["point_l"]).clicked {
+            state.device_list_closed = false;
+        }
+        return;
+    }
+    {
+        let size = Vec2::splat(p.style().item_size.y);
+        let bounds = Rect::from_min_size(screen.tr() - vec2(size.x + bounds.width(), 0.0), size);
+        if p.image_button(Some(bounds), &MAIN_ATLAS["point_r"]).clicked {
+            state.device_list_closed = true;
+        }
+    }
+
     let mut p = MenuPainter::new(bounds, p);
-    let old_style = p.style().clone();
-    p.style.item_size.x *= 0.5;
+    p.start(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::X);
+    p.fit_button_text = true;
 
-    p.start(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::Y);
+    let b_size = p.style().item_size.y * 0.5;
 
-    for (idx, chip) in chips.iter().enumerate() {
-        let int = p.button(None, &chip.name);
+    for color in library.used_colors() {
+        let selected = state.device_list_filter == Some(color);
+        let center = p.placer.next(Vec2::splat(b_size)).center();
+        let shape = Rect::from_center_size(center, Vec2::splat(b_size));
+        let int = p.interact(shape);
+        let ocolor = match selected {
+            true => p.style().text_color,
+            false => int.color,
+        };
+        if int.hovered || selected {
+            p.model.circle(center, b_size * 0.6, 20, ocolor);
+        }
+        p.model
+            .circle(center, b_size * 0.5, 20, color.as_color().inv().darken(30));
+        p.model.circle(center, b_size * 0.45, 20, color.as_color());
+
+        if int.clicked {
+            match selected {
+                true => state.device_list_filter = None,
+                false => state.device_list_filter = Some(color),
+            }
+        }
+    }
+    p.start(
+        screen.tr() + Vec2::Y * (b_size + p.style().item_spacing.y * 2.0),
+        Align2::TOP_RIGHT,
+        Align2::MIN,
+        Vec2::Y,
+    );
+    p.push_style(|style| style.item_size *= 0.5);
+
+    for (idx, chip) in library.chips.iter().enumerate() {
+        if state.device_list_filter.is_some() && state.device_list_filter != Some(chip.attrs.color)
+        {
+            continue;
+        }
+
+        let int = p.button(None, &chip.attrs.name);
         if int.clicked {
             out.push(Cmd::PlacerAdd(idx));
         } else if int.rclicked {
@@ -424,7 +488,7 @@ pub fn show_device_list(
             state.library_sel = Some(idx);
         }
     }
-    p.style = old_style;
+    p.pop_style();
 }
 
 pub fn show_device_placer(
@@ -510,7 +574,7 @@ pub fn show_chip_ctx_menu(
     let mut p = MenuPainter::new(bounds, p);
     p.start(pos, Align2::BOTTOM_CENTER, Align2::CENTER, Vec2::Y);
 
-    p.text(None, &chip.name);
+    p.text(None, &chip.attrs.name);
     p.seperator();
     if p.button(None, "Info").clicked {
         state.library_sel = chip.save;
@@ -538,6 +602,7 @@ pub struct App {
     pub library_menu: Rect,
     pub options_menu: Rect,
     pub info_menu: Rect,
+    pub scenes_menu: Rect,
     pub save_menu: Rect,
     pub overlay_ui: Rect,
     pub device_list_ui: Rect,
@@ -576,11 +641,11 @@ impl App {
         let gpu = Gpu::new(&self.instance, &window, win_size).await.unwrap();
         gpu.configure_surface();
 
-        // let mut renderer = Renderer::new(&gpu);
         let mut renderer = Renderer::new(&gpu);
-        renderer.update_size(&gpu, win_size.as_vec2());
-        renderer.update_global_transform(&gpu, Default::default());
-        renderer.update_atlas_size(&gpu, MAIN_ATLAS.size);
+        renderer.locals.screen_size = win_size.as_vec2().into();
+        renderer.locals.texture_size = MAIN_ATLAS.size;
+        renderer.upload_locals(&gpu);
+
         self.device_placer.pos = self.scene().transform.inv() * (win_size.as_vec2() * 0.5);
 
         self.gpu = Some(gpu);
@@ -601,7 +666,8 @@ impl App {
             gpu.configure_surface();
 
             if let Some(renderer) = &mut self.renderer {
-                renderer.update_size(gpu, size.as_vec2());
+                renderer.locals.screen_size = size.as_vec2().into();
+                renderer.upload_locals(gpu);
             }
         }
         self.device_placer.pos = self.scene().transform.inv() * (size.as_vec2() * 0.5);
@@ -621,6 +687,28 @@ impl App {
             .as_mut()
             .ok_or(format!("Missing Renderer instance"))?;
 
+        if let Some(d) = input.char_press().and_then(|ch| ch.to_digit(10)) {
+            log::info!("Pressed digit: {d}");
+        }
+
+        // ---- Handle Key Binds ----
+        // Note: Key binds than only work in specific UI elements are handled in the code for that UI.
+        if input.key_pressed(Key::F1) {
+            self.ui_state.open_menu = Some(Menu::Options);
+        }
+        if input.key_pressed(Key::F2) {
+            self.ui_state.open_menu = Some(Menu::Scenes);
+        }
+        if input.key_pressed(Key::F3) && !input.modifiers().cmd {
+            self.ui_state.open_menu = Some(Menu::Save);
+        }
+        if input.key_pressed(Key::Esc) {
+            self.ui_state.open_menu = None;
+        }
+        if input.key_pressed(Key::F3) && input.modifiers().cmd {
+            self.ui_state.ui_debugging ^= true;
+        }
+
         // ---- Step Simulation ----
         self.scenes[self.open_scene]
             .sim
@@ -630,13 +718,13 @@ impl App {
         for cmd in self.commands.drain(..) {
             match cmd {
                 Cmd::None => {}
+                Cmd::SceneSel(idx) => self.open_scene = idx,
                 Cmd::SceneClear => self.scenes[self.open_scene].clear(),
-                Cmd::SceneDel => {
-                    self.scenes[self.open_scene].clear();
+                Cmd::SceneDel(idx) => {
                     if self.scenes.len() > 1 {
-                        self.scenes.remove(self.open_scene);
-                        if self.open_scene > 0 {
-                            self.open_scene -= 1;
+                        self.scenes.remove(idx);
+                        if self.open_scene >= self.scenes.len() {
+                            self.open_scene = self.scenes.len() - 1;
                         }
                     }
                 }
@@ -646,10 +734,8 @@ impl App {
                 }
                 Cmd::ScenePack => {
                     // self.scene.optimize();
-                    let name = self.ui_state.chip_name.text.clone();
-                    let ty = self.ui_state.chip_ty;
-                    let color = self.ui_state.chip_color.as_color();
-                    let save = create_chip_save(name, ty, color, &self.scenes[self.open_scene]);
+                    let save = create_chip_save(&self.scenes[self.open_scene]);
+                    self.scenes[self.open_scene].save_attrs = Default::default();
                     self.library.add(&[save]);
                     self.scenes[self.open_scene].clear();
                     self.ui_state.open_menu = None;
@@ -672,10 +758,16 @@ impl App {
                 }
                 Cmd::ChipView(idx) => {
                     if let Some(scene) = &self.library.chips[idx].scene {
+                        let idx = self.scenes.len();
                         self.scenes.push(scene.clone());
+                        self.open_scene = idx;
                     }
                 }
                 Cmd::ChipDelete(idx) => {
+                    let color = self.library.chips[idx].attrs.color;
+                    if self.ui_state.device_list_filter == Some(color) {
+                        self.ui_state.device_list_filter = None;
+                    }
                     _ = self.library.chips.remove(idx);
                     if self.ui_state.library_sel == Some(idx) {
                         self.ui_state.library_sel = None;
@@ -690,6 +782,7 @@ impl App {
         // ------ Start Drawing ------
         let mut model = ModelBuilder::default();
         let mut painter = Painter::new(self.settings.create_style(), input, &mut model);
+        painter.debug = self.ui_state.ui_debugging;
 
         // ---- Draw Scene ----
         let show_device_placer_cond = self.device_placer.chips.len() > 0;
@@ -795,11 +888,21 @@ impl App {
                 content_rect,
                 &mut self.ui_state,
             ),
+            Some(Menu::Scenes) => show_scenes_menu(
+                &mut self.scenes_menu,
+                &mut painter,
+                content_rect,
+                &mut self.ui_state,
+                &mut self.commands,
+                &self.scenes,
+                self.open_scene,
+            ),
             Some(Menu::Save) => show_save_menu(
                 &mut self.save_menu,
                 &mut painter,
                 content_rect,
                 &mut self.ui_state,
+                &mut self.scenes[self.open_scene].save_attrs,
                 &mut self.commands,
             ),
             Some(Menu::Library) => show_library_menu(
@@ -817,13 +920,14 @@ impl App {
                     content_rect,
                     fps,
                     &mut self.ui_state,
+                    &mut self.scenes[self.open_scene],
                 );
                 show_device_list(
                     &mut self.device_list_ui,
                     &mut painter,
                     content_rect,
                     &mut self.ui_state,
-                    &self.library.chips,
+                    &self.library,
                     &mut self.commands,
                 );
             }
@@ -838,7 +942,7 @@ impl App {
     }
 }
 
-pub fn create_chip_save(name: String, ty: ChipTy, color: Color, scene: &Scene) -> ChipSave {
+pub fn create_chip_save(scene: &Scene) -> ChipSave {
     let region_size = scene.sim.next_region;
     let l_nodes = scene
         .l_nodes
@@ -859,10 +963,8 @@ pub fn create_chip_save(name: String, ty: ChipTy, color: Color, scene: &Scene) -
         }
     }
     ChipSave {
+        attrs: scene.save_attrs.clone(),
         region_size,
-        name,
-        ty,
-        color,
         builtin: false,
         scene: Some(scene.clone()),
         l_nodes,
@@ -907,10 +1009,9 @@ pub fn place_chip(
     }
 
     let chip = SceneChip {
+        attrs: save.attrs.clone(),
         region,
         pos,
-        name: save.name.clone(),
-        color: save.color,
         rotation,
         save: save_id,
         l_nodes,

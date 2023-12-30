@@ -30,7 +30,7 @@ To compile for the web you will need:
 - the Rust wasm32 target installed
 - wasm-bindgen
 ```sh
-rustup target add wasm-unkown-unkown
+rustup target add wasm32-unkown-unkown
 cargo install wasm-bindgen
 ```
 
@@ -91,6 +91,12 @@ APK_UID=$(adb shell pm list package -U com.logisim.android)
 APK_UID_TRIMMED=${APK_UID#*uid:}
 adb logcat -c
 adb -d logcat -v color --uid $APK_UID_TRIMMED
+```
+
+You can copy your chip library from your desktop computer to your android device with something like:
+(Replace `~/.local/share/logisim` with whereever your saves are stored on your computer).
+```sh
+adb push ~/.local/share/logisim/library.data /storage/self/primary/Android/data/com.logisim.android/files/
 ```
 
 #### IOS

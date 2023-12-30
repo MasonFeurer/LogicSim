@@ -1,6 +1,7 @@
 use crate::graphics::ui::{Align2, Interaction, Painter};
 use crate::graphics::{Color, Rect, Transform, MAIN_ATLAS};
 use crate::input::PtrButton;
+use crate::sim::save::ChipAttrs;
 use crate::sim::{save, NodeAddr, NodeRegion, Sim};
 use crate::Id;
 
@@ -180,8 +181,8 @@ pub struct SceneOutput {
 
 #[derive(Default, Clone, Serialize, Deserialize)]
 pub struct Scene {
-    pub name: String,
     pub sim: Sim,
+    pub save_attrs: ChipAttrs,
     pub transform: Transform,
     pub l_nodes: ExternalNodes,
     pub r_nodes: ExternalNodes,
@@ -324,10 +325,9 @@ impl From<Chip> for Device {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Chip {
+    pub attrs: ChipAttrs,
     pub region: NodeRegion,
     pub pos: Vec2,
-    pub name: String,
-    pub color: Color,
     pub rotation: Rotation,
     pub save: Option<usize>,
     pub l_nodes: Vec<(NodeAddr, String, save::IoType)>,
@@ -392,8 +392,8 @@ impl Chip {
         let rect = Rect::from_center_size(self.pos, size);
 
         let chip_color = match id {
-            Some(_) => self.color,
-            None => self.color.darken(120),
+            Some(_) => self.attrs.color.as_color(),
+            None => self.attrs.color.as_color().darken(120),
         };
         ui.model_mut()
             .rounded_rect(rect, 10.0, 20, &MAIN_ATLAS.white, chip_color.into());
@@ -459,13 +459,13 @@ impl Chip {
 
             y += NODE_SIZE + NODE_SPACING;
         }
-        let text_size = ui.text_size(&self.name, NODE_SIZE * 0.5);
+        let text_size = ui.text_size(&self.attrs.name, NODE_SIZE * 0.5);
         ui.place_text(
             Rect::from_center_size(
                 vec2(self.pos.x, self.pos.y - size.y * 0.5 - text_size.y * 0.5),
                 text_size,
             ),
-            (&self.name, text_size),
+            (&self.attrs.name, text_size),
             ui.style().text_color,
             Align2::CENTER,
         );

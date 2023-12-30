@@ -1,9 +1,9 @@
 struct Locals {
 	screen_size: vec2<f32>,
-	global_offset: vec2<f32>,
-	global_scale: f32,
 	texture_size: u32,
-	_padding: vec2<f32>,
+	_padding0: u32,
+	_padding1: vec2<u32>,
+	_padding2: vec2<u32>,
 }
 
 @group(0) @binding(0) var<uniform> u_locals: Locals;
@@ -43,7 +43,7 @@ struct Fragment {
 @vertex
 fn vs_main(in: Vertex) -> Fragment {
 	var out: Fragment;
-	out.pos = position_from_screen(in.pos * u_locals.global_scale + u_locals.global_offset);
+	out.pos = position_from_screen(in.pos);
 
 	out.uv = vec2<f32>(in.uv) / f32(u_locals.texture_size);
 	out.color = unpack_color(in.color);
