@@ -736,7 +736,18 @@ impl App {
                     // self.scene.optimize();
                     let save = create_chip_save(&self.scenes[self.open_scene]);
                     self.scenes[self.open_scene].save_attrs = Default::default();
-                    self.library.add(&[save]);
+
+                    if let Some(c) = self
+                        .library
+                        .chips
+                        .iter_mut()
+                        .find(|chip| chip.attrs.name == save.attrs.name)
+                    {
+                        *c = save;
+                    } else {
+                        self.library.chips.push(save);
+                    }
+
                     self.scenes[self.open_scene].clear();
                     self.ui_state.open_menu = None;
                 }
