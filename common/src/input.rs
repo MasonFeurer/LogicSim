@@ -101,9 +101,7 @@ impl InputState {
         None
     }
     pub fn get_drag_full(&self, id: Id) -> Option<Drag> {
-        if self.ptr_pos.is_none() {
-            return None;
-        };
+        self.ptr_pos?;
         if let Some(drag) = &self.drag {
             if drag.id == id {
                 return Some(drag.clone());

@@ -38,7 +38,7 @@ impl Model {
         indices: &[Index],
     ) -> Self {
         pub unsafe fn slice_as_byte_slice<T>(a: &[T]) -> &[u8] {
-            std::slice::from_raw_parts(a.as_ptr() as *const u8, a.len() * std::mem::size_of::<T>())
+            std::slice::from_raw_parts(a.as_ptr() as *const u8, std::mem::size_of_val(a))
         }
 
         use wgpu::util::{BufferInitDescriptor, DeviceExt as _};
@@ -166,7 +166,7 @@ impl ModelBuilder {
         for step in 1..=detail {
             let angle = (step as f32 / detail as f32) * std::f32::consts::TAU;
             let p = center + vec2(angle.sin(), angle.cos()) * r;
-            self.tri([prev_pos, p, center], &tex, color);
+            self.tri([prev_pos, p, center], tex, color);
             prev_pos = p;
         }
     }
@@ -177,7 +177,7 @@ impl ModelBuilder {
         for step in 1..=detail {
             let angle = (step as f32 / detail as f32) * std::f32::consts::TAU;
             let p = center + vec2(angle.sin(), angle.cos()) * r;
-            self.line([prev_pos, p], w, &tex, color);
+            self.line([prev_pos, p], w, tex, color);
             prev_pos = p;
         }
     }
@@ -197,7 +197,7 @@ impl ModelBuilder {
         for step in 1..=detail {
             let angle = (range[0] + range_size * (step as f32 / detail as f32)) * TAU;
             let p = center + vec2(angle.sin(), angle.cos()) * r;
-            self.tri([prev_pos, p, center], &tex, color);
+            self.tri([prev_pos, p, center], tex, color);
             prev_pos = p;
         }
     }
@@ -218,7 +218,7 @@ impl ModelBuilder {
         for step in 1..=detail {
             let angle = (range[0] + range_size * (step as f32 / detail as f32)) * TAU;
             let p = center + vec2(angle.sin(), angle.cos()) * r;
-            self.line([prev_pos, p], w, &tex, color);
+            self.line([prev_pos, p], w, tex, color);
             prev_pos = p;
         }
     }
@@ -230,10 +230,10 @@ impl ModelBuilder {
 
     pub fn rect_outline(&mut self, rect: Rect, w: f32, color: Color) {
         let tex = &MAIN_ATLAS.white;
-        self.line([rect.tl(), rect.tr()], w, &tex, color);
-        self.line([rect.tr(), rect.br()], w, &tex, color);
-        self.line([rect.bl(), rect.br()], w, &tex, color);
-        self.line([rect.tl(), rect.bl()], w, &tex, color);
+        self.line([rect.tl(), rect.tr()], w, tex, color);
+        self.line([rect.tr(), rect.br()], w, tex, color);
+        self.line([rect.bl(), rect.br()], w, tex, color);
+        self.line([rect.tl(), rect.bl()], w, tex, color);
     }
 
     pub fn rounded_rect(&mut self, rect: Rect, r: f32, detail: u32, tex: &Image, color: Color) {
@@ -265,10 +265,10 @@ impl ModelBuilder {
         self.circle_outline_section(tr + vec2(-r, r), r, w, detail, [0.25, 0.50], color);
         self.circle_outline_section(br - vec2(r, r), r, w, detail, [0.0, 0.25], color);
         self.circle_outline_section(bl + vec2(r, -r), r, w, detail, [0.75, 1.0], color);
-        self.line([tl + Vec2::X * r, tr - Vec2::X * r], w, &tex, color);
-        self.line([tr + Vec2::Y * r, br - Vec2::Y * r], w, &tex, color);
-        self.line([bl + Vec2::X * r, br - Vec2::X * r], w, &tex, color);
-        self.line([tl + Vec2::Y * r, bl - Vec2::Y * r], w, &tex, color);
+        self.line([tl + Vec2::X * r, tr - Vec2::X * r], w, tex, color);
+        self.line([tr + Vec2::Y * r, br - Vec2::Y * r], w, tex, color);
+        self.line([bl + Vec2::X * r, br - Vec2::X * r], w, tex, color);
+        self.line([tl + Vec2::Y * r, bl - Vec2::Y * r], w, tex, color);
     }
 
     pub fn finish(&self, device: &wgpu::Device) -> Model {

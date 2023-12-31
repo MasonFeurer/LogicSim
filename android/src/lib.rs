@@ -25,6 +25,7 @@ static LEFT_DISPLAY_INSET: AtomicI32 = AtomicI32::new(0);
 
 #[allow(dead_code)]
 #[allow(non_snake_case)]
+#[allow(clippy::not_unsafe_ptr_arg_deref)] // This code is only called by the Android JVM, so `cutouts` should be valid.
 #[no_mangle]
 /// Callback from Java code to update display insets (cutouts).
 pub extern "C" fn Java_com_logisim_android_MainActivity_onDisplayInsets(
@@ -139,7 +140,7 @@ impl TouchTranslater {
             out(LogisimInputEvent::PointerLeft);
             out(LogisimInputEvent::Release(PtrButton::LEFT));
 
-            let mut pointers = self.pointers.iter().cloned().filter_map(|ptr| ptr);
+            let mut pointers = self.pointers.iter().cloned().flatten();
             let [a, b] = [pointers.next().unwrap(), pointers.next().unwrap()];
             let dist = a.pos.distance_squared(b.pos);
             let anchor = Rect::from_min_max(a.pos.min(b.pos), a.pos.max(b.pos)).center();
@@ -177,7 +178,7 @@ impl TouchTranslater {
             ptr.pos = pos;
         }
         if self.pointer_count == 2 {
-            let mut pointers = self.pointers.iter().cloned().filter_map(|ptr| ptr);
+            let mut pointers = self.pointers.iter().cloned().flatten();
             let [a, b] = [pointers.next().unwrap(), pointers.next().unwrap()];
             let dist = a.pos.distance_squared(b.pos);
             let zoom = self.zoom.as_ref().unwrap();
@@ -317,7 +318,7 @@ fn handle_main_event(event: MainEvent, state: &mut State) {
             log::info!("Saving app's state...");
 
             let settings = bincode::serialize(&state.app.settings).unwrap();
-            match std::fs::write(&state.save_dirs.settings, &settings) {
+            match std::fs::write(&state.save_dirs.settings, settings) {
                 Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
                 Err(err) => log::warn!(
                     "Failed to save settings to {:?} : {err:?}",
@@ -326,7 +327,7 @@ fn handle_main_event(event: MainEvent, state: &mut State) {
             }
 
             let library = bincode::serialize(&state.app.library).unwrap();
-            match std::fs::write(&state.save_dirs.library, &library) {
+            match std::fs::write(&state.save_dirs.library, library) {
                 Ok(_) => log::info!("Saved library to {:?}", state.save_dirs.library),
                 Err(err) => log::warn!(
                     "Failed to save library to {:?} : {err:?}",
@@ -335,7 +336,7 @@ fn handle_main_event(event: MainEvent, state: &mut State) {
             }
 
             let scene = bincode::serialize(&state.app.scene()).unwrap();
-            match std::fs::write(&state.save_dirs.scene, &scene) {
+            match std::fs::write(&state.save_dirs.scene, scene) {
                 Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
                 Err(err) => log::warn!(
                     "Failed to save scene to {:?} : {err:?}",
@@ -530,18 +531,15 @@ fn draw_frame(state: &mut State) {
 
     // Draw frame
     let mut text_input = None;
-    match state.app.draw_frame(
+    if let Err(err) = state.app.draw_frame(
         &mut state.input,
         content_rect,
         &mut text_input,
         state.fps,
         &mut Default::default(),
     ) {
-        Err(err) => {
-            log::warn!("Failed to draw frame: {err:?}");
-            return;
-        }
-        Ok(_) => {}
+        log::warn!("Failed to draw frame: {err:?}");
+        return;
     }
 
     // Handle text input
@@ -617,7 +615,7 @@ fn character_map_and_combine_key(
                     Some(unicode)
                 };
                 *combining_accent = None;
-                combined_unicode.map(|unicode| KeyMapChar::Unicode(unicode))
+                combined_unicode.map(KeyMapChar::Unicode)
             } else {
                 Some(KeyMapChar::Unicode(unicode))
             }

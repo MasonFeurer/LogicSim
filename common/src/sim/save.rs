@@ -96,7 +96,7 @@ impl Library {
         use crate::graphics::ui::CycleState;
 
         // Technically not O(n^2) because ItemColor::COUNT is constant, thus the complexity is actually O(n)
-        (0..ItemColor::COUNT).into_iter().filter_map(|v| {
+        (0..ItemColor::COUNT).filter_map(|v| {
             self.chips
                 .iter()
                 .any(|chip| chip.attrs.color.as_u8() == v)

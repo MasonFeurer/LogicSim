@@ -21,7 +21,7 @@ impl IntoIterator for NodeRange {
     type IntoIter = std::iter::Map<std::ops::RangeInclusive<u32>, fn(u32) -> NodeAddr>;
 
     fn into_iter(self) -> Self::IntoIter {
-        ((self.0).0..=(self.1).0).into_iter().map(|i| NodeAddr(i))
+        ((self.0).0..=(self.1).0).map(NodeAddr)
     }
 }
 
@@ -85,10 +85,6 @@ impl SourceTy {
         }
     }
     #[inline(always)]
-    pub const unsafe fn from_u8_unchecked(v: u8) -> Self {
-        std::mem::transmute(v)
-    }
-    #[inline(always)]
     pub const fn as_u8(self) -> u8 {
         match self {
             Self::None => 0,
@@ -123,9 +119,12 @@ impl Source {
     pub fn ty(&self) -> SourceTy {
         SourceTy::from_u8(((self.0 & 0x0300000000000000) >> 56) as u8).unwrap()
     }
+
+    /// # Safety
+    /// self.0 must hold a valid representation of SourceTy at bits 2-3.
     #[inline(always)]
     pub const unsafe fn ty_unchecked(&self) -> SourceTy {
-        SourceTy::from_u8_unchecked(((self.0 & 0x0300000000000000) >> 56) as u8)
+        std::mem::transmute(((self.0 & 0x0300000000000000) >> 56) as u8)
     }
     #[inline(always)]
     pub fn set_ty(&mut self, t: SourceTy) {
@@ -266,7 +265,7 @@ impl Sim {
                 let input_nodes = &nodes[table_src.inputs.0 as usize
                     ..(table_src.inputs.0 as usize + table.num_inputs as usize)];
                 let mut input: u32 = 0;
-                for (idx, node) in input_nodes.into_iter().enumerate() {
+                for (idx, node) in input_nodes.iter().enumerate() {
                     input |= (node.state() as u32) << idx as u32;
                 }
                 let output = table.map[input as usize];

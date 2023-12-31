@@ -1,5 +1,5 @@
 use super::{Color, Image, ModelBuilder, Rect, StaticFont, MAIN_ATLAS};
-use glam::{vec2, UVec2, Vec2};
+use glam::{vec2, Vec2};
 
 /// ```rs
 /// assert_eq!(split_first("Hello!"), Some(('H', "ello!")));
@@ -9,7 +9,7 @@ use glam::{vec2, UVec2, Vec2};
 /// assert_eq!(split_first(""), None);
 /// ```
 fn split_first(s: &str) -> Option<(char, &str)> {
-    if s.len() == 0 {
+    if s.is_empty() {
         return None;
     }
     let ch = s.chars().next().unwrap();
@@ -54,10 +54,10 @@ impl<'a> Iterator for TextLayoutGen<'a> {
         let offset = img.origin().as_vec2() * r;
 
         let real_min = self.cursor - vec2(0.0, offset.y + self.offset);
-        let real_size = UVec2::from(img.size()).as_vec2() * r - Vec2::X * offset.x;
+        let real_size = img.size().as_vec2() * r - Vec2::X * offset.x;
         let real_bounds = Rect::from_min_size(real_min, real_size);
 
-        let img_size = UVec2::from(img.size()).as_vec2() * r;
+        let img_size = img.size().as_vec2() * r;
         let img_min = self.cursor - vec2(offset.x, offset.y + self.offset);
         let img_bounds = Rect::from_min_size(img_min, img_size);
 

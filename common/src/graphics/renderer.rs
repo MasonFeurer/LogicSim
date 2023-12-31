@@ -205,7 +205,7 @@ impl Renderer {
         for model in models {
             pass.set_vertex_buffer(0, model.vertex_buf.slice(..));
             pass.set_index_buffer(model.index_buf.slice(..), IndexFormat::Uint32);
-            pass.draw_indexed(0..model.index_count as u32, 0, 0..1);
+            pass.draw_indexed(0..model.index_count, 0, 0..1);
         }
 
         std::mem::drop(pass);

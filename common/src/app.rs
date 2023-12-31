@@ -91,32 +91,32 @@ impl Settings {
         rs.seperator_w *= scale;
 
         if matches!(self.ui_theme, UiTheme::Light) {
-            rs.text_color = Color::shade(0).into();
+            rs.text_color = Color::shade(0);
             rs.background = Color::shade(215);
-            rs.menu_background = Color::shade(180).into();
-            rs.item_color = Color::shade(100).into();
-            rs.item_hover_color = Color::shade(160).into();
-            rs.item_press_color = Color::shade(200).into();
+            rs.menu_background = Color::shade(180);
+            rs.item_color = Color::shade(100);
+            rs.item_hover_color = Color::shade(160);
+            rs.item_press_color = Color::shade(200);
         } else if matches!(self.ui_theme, UiTheme::Night) {
-            rs.text_color = Color::shade(255).into();
-            rs.menu_background = Color::shade(1).into();
+            rs.text_color = Color::shade(255);
+            rs.menu_background = Color::shade(1);
             rs.background = Color::shade(0);
-            rs.item_color = Color::shade(3).into();
-            rs.item_hover_color = Color::shade(40).into();
-            rs.item_press_color = Color::shade(2).into();
+            rs.item_color = Color::shade(3);
+            rs.item_hover_color = Color::shade(40);
+            rs.item_press_color = Color::shade(2);
         } else if matches!(self.ui_theme, UiTheme::Neon) {
-            rs.text_color = Color::shade(255).into();
-            rs.menu_background = Color::shade(1).into();
+            rs.text_color = Color::shade(255);
+            rs.menu_background = Color::shade(1);
             rs.background = Color::shade(0);
-            rs.item_color = Color::rgb(0, 58, 58).into();
-            rs.item_hover_color = Color::rgb(30, 80, 30).into();
-            rs.item_press_color = Color::shade(1).into();
+            rs.item_color = Color::rgb(0, 58, 58);
+            rs.item_hover_color = Color::rgb(30, 80, 30);
+            rs.item_press_color = Color::shade(1);
         } else if matches!(self.ui_theme, UiTheme::Pink) {
-            rs.text_color = Color::shade(255).into();
-            rs.menu_background = Color::rgb(38, 0, 22).into();
+            rs.text_color = Color::shade(255);
+            rs.menu_background = Color::rgb(38, 0, 22);
             rs.background = Color::shade(0);
-            rs.item_color = Color::rgb(125, 0, 46).into();
-            rs.item_hover_color = Color::rgb(122, 42, 71).into();
+            rs.item_color = Color::rgb(125, 0, 46);
+            rs.item_hover_color = Color::rgb(122, 42, 71);
             rs.item_press_color = rs.menu_background;
         }
         rs
@@ -356,7 +356,7 @@ pub fn show_library_menu(
     } else {
         p.text_lg(None, "Library");
         p.seperator();
-        for (idx, chip) in chips.into_iter().enumerate() {
+        for (idx, chip) in chips.iter().enumerate() {
             if p.button(None, &chip.attrs.name).clicked {
                 state.library_sel = Some(idx);
             }
@@ -681,11 +681,14 @@ impl App {
         fps: u32,
         out: &mut FrameOutput,
     ) -> Result<(), String> {
-        let gpu = self.gpu.as_ref().ok_or(format!("Missing Gpu instance"))?;
+        let gpu = self
+            .gpu
+            .as_ref()
+            .ok_or(String::from("Missing Gpu instance"))?;
         let renderer = self
             .renderer
             .as_mut()
-            .ok_or(format!("Missing Renderer instance"))?;
+            .ok_or(String::from("Missing Renderer instance"))?;
 
         if let Some(d) = input.char_press().and_then(|ch| ch.to_digit(10)) {
             log::info!("Pressed digit: {d}");
@@ -796,11 +799,11 @@ impl App {
         painter.debug = self.ui_state.ui_debugging;
 
         // ---- Draw Scene ----
-        let show_device_placer_cond = self.device_placer.chips.len() > 0;
-        let mut scene_hovered = !painter.input.area_hovered(self.device_list_ui)
-            && !painter.input.area_hovered(self.overlay_ui)
-            && self.ui_state.open_menu.is_none()
-            && !(painter.input.area_hovered(self.device_placer_ui) && show_device_placer_cond);
+        let show_device_placer_cond = !self.device_placer.chips.is_empty();
+        let mut scene_hovered = !(self.ui_state.open_menu.is_some()
+            || painter.input.area_hovered(self.overlay_ui)
+            || painter.input.area_hovered(self.device_list_ui)
+            || painter.input.area_hovered(self.device_placer_ui) && show_device_placer_cond);
 
         painter.set_transform(self.scenes[self.open_scene].transform);
         painter.covered = self.ui_state.open_menu.is_some();
@@ -968,7 +971,7 @@ pub fn create_chip_save(scene: &Scene) -> ChipSave {
         .map(|addr| (String::from(""), *addr, scene.sim.get_node(*addr)))
         .collect();
     let mut inner_nodes = Vec::new();
-    for (_, device) in &scene.devices {
+    for device in scene.devices.values() {
         for addr in device.sim_nodes() {
             inner_nodes.push((addr, scene.sim.get_node(addr)));
         }

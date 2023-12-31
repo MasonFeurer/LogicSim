@@ -65,7 +65,7 @@ pub enum Side {
 }
 
 fn draw_node(p: &mut Painter, state: bool, center: Vec2, r: f32) -> Interaction {
-    let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
+    let node_colors = [Color::rgb(64, 2, 0), Color::rgb(235, 19, 12)];
 
     let fill_color = node_colors[state as usize];
     let int = p.interact(Rect::from_circle(center, r));
@@ -241,7 +241,7 @@ impl Scene {
         }
 
         // Draw Wires
-        let colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
+        let colors = [Color::rgb(64, 2, 0), Color::rgb(235, 19, 12)];
         for wire in &self.wires {
             let Some(src) = self.node_info(wire.input) else {
                 continue;
@@ -386,7 +386,7 @@ impl Chip {
         sim: &mut Sim,
         out: &mut SceneOutput,
     ) {
-        let node_colors = [Color::rgb(64, 2, 0).into(), Color::rgb(235, 19, 12).into()];
+        let node_colors = [Color::rgb(64, 2, 0), Color::rgb(235, 19, 12)];
 
         let size = self.size();
         let rect = Rect::from_center_size(self.pos, size);
@@ -396,7 +396,7 @@ impl Chip {
             None => self.attrs.color.as_color().darken(120),
         };
         ui.model_mut()
-            .rounded_rect(rect, 10.0, 20, &MAIN_ATLAS.white, chip_color.into());
+            .rounded_rect(rect, 10.0, 20, &MAIN_ATLAS.white, chip_color);
 
         let chip_int = ui.interact(rect);
         if chip_int.clicked {
@@ -420,9 +420,9 @@ impl Chip {
                 }
             }
             if int.clicked {
-                match ty {
-                    &save::IoType::Input => out.clicked_input = Some(*addr),
-                    &save::IoType::Output => out.clicked_output = Some(*addr),
+                match *ty {
+                    save::IoType::Input => out.clicked_input = Some(*addr),
+                    save::IoType::Output => out.clicked_output = Some(*addr),
                 }
             }
             if int.hovered {
@@ -447,9 +447,9 @@ impl Chip {
                 }
             }
             if int.clicked {
-                match ty {
-                    &save::IoType::Input => out.clicked_input = Some(*addr),
-                    &save::IoType::Output => out.clicked_output = Some(*addr),
+                match *ty {
+                    save::IoType::Input => out.clicked_input = Some(*addr),
+                    save::IoType::Output => out.clicked_output = Some(*addr),
                 }
             }
             if int.hovered {

@@ -204,15 +204,14 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
 
                 ctx.last_frame_time = SystemTime::now();
                 let mut out = FrameOutput::default();
-                match ctx.app.draw_frame(
+                if let Err(err) = ctx.app.draw_frame(
                     &mut ctx.input,
                     content_rect,
                     &mut Default::default(),
                     ctx.fps,
                     &mut out,
                 ) {
-                    Err(err) => log::warn!("Failed to draw frame: {err:?}"),
-                    Ok(_) => {}
+                    log::warn!("Failed to draw frame: {err:?}");
                 }
                 if out.download_data {
                     log::info!("TODO: download data");

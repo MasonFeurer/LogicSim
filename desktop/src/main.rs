@@ -112,7 +112,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
         Event::LoopExiting => {
             let settings = bincode::serialize(&state.app.settings).unwrap();
-            match std::fs::write(&state.save_dirs.settings, &settings) {
+            match std::fs::write(&state.save_dirs.settings, settings) {
                 Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
                 Err(err) => log::warn!(
                     "Failed to save settings to {:?} : {err:?}",
@@ -121,7 +121,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
             }
 
             let library = bincode::serialize(&state.app.library).unwrap();
-            match std::fs::write(&state.save_dirs.library, &library) {
+            match std::fs::write(&state.save_dirs.library, library) {
                 Ok(_) => log::info!("Saved library to {:?}", state.save_dirs.library),
                 Err(err) => log::warn!(
                     "Failed to save library to {:?} : {err:?}",
@@ -130,7 +130,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
             }
 
             let scene = bincode::serialize(&state.app.scenes).unwrap();
-            match std::fs::write(&state.save_dirs.scene, &scene) {
+            match std::fs::write(&state.save_dirs.scene, scene) {
                 Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
                 Err(err) => log::warn!(
                     "Failed to save scene to {:?} : {err:?}",
@@ -174,15 +174,14 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 }
 
                 ctx.last_frame_time = SystemTime::now();
-                match ctx.app.draw_frame(
+                if let Err(err) = ctx.app.draw_frame(
                     &mut ctx.input,
                     content_rect,
                     &mut ctx.text_input,
                     ctx.fps,
                     &mut Default::default(),
                 ) {
-                    Err(err) => log::warn!("Failed to draw frame: {err:?}"),
-                    Ok(_) => {}
+                    log::warn!("Failed to draw frame: {err:?}");
                 }
                 ctx.input.update();
             }

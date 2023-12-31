@@ -26,13 +26,13 @@ impl Default for Style {
         Self {
             text_size: 30.0,
             lg_text_size: 50.0,
-            text_color: Color::shade(255).into(),
+            text_color: Color::shade(255),
             background: Color::shade(4),
-            menu_background: Color::shade(10).into(),
+            menu_background: Color::shade(10),
             item_size: vec2(200.0, 35.0),
-            item_color: Color::shade(30).into(),
-            item_hover_color: Color::shade(20).into(),
-            item_press_color: Color::shade(10).into(),
+            item_color: Color::shade(30),
+            item_hover_color: Color::shade(20),
+            item_press_color: Color::shade(10),
             item_spacing: vec2(5.0, 5.0),
             seperator_w: 3.0,
             margin: Vec2::splat(5.0),
@@ -297,12 +297,12 @@ impl<'i, 'm, 'x, 'y> std::ops::Drop for MenuPainter<'i, 'm, 'x, 'y> {
 impl<'i, 'm, 'x, 'y> std::ops::Deref for MenuPainter<'i, 'm, 'x, 'y> {
     type Target = Painter<'i, 'm>;
     fn deref(&self) -> &Self::Target {
-        &self.painter
+        self.painter
     }
 }
 impl<'i, 'm, 'x, 'y> std::ops::DerefMut for MenuPainter<'i, 'm, 'x, 'y> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.painter
+        self.painter
     }
 }
 
@@ -409,32 +409,33 @@ impl<'i, 'm> Painter<'i, 'm> {
 
     pub fn interact(&mut self, shape: Rect) -> Interaction {
         if self.covered {
-            let mut rs = Interaction::default();
-            rs.color = self.style.item_color;
-            return rs;
+            return Interaction {
+                color: self.style.item_color,
+                ..Default::default()
+            };
         }
         let shape = self.transform * shape;
-        let mut rs = Interaction::default();
-        rs.hovered = self.input.area_hovered(shape);
-        rs.color = if self.input.area_hovered(shape) {
-            if self.input.ptr_down(PtrButton::LEFT) {
-                self.style.item_press_color
+        Interaction {
+            hovered: self.input.area_hovered(shape),
+            color: if self.input.area_hovered(shape) {
+                if self.input.ptr_down(PtrButton::LEFT) {
+                    self.style.item_press_color
+                } else {
+                    self.style.item_hover_color
+                }
             } else {
-                self.style.item_hover_color
-            }
-        } else {
-            self.style.item_color
-        };
-        rs.rclicked = self.input.area_clicked(shape, PtrButton::RIGHT);
-        rs.clicked = self.input.area_clicked(shape, PtrButton::LEFT);
-        rs.clicked_elsewhere = self.input.area_outside_clicked(shape, PtrButton::LEFT);
-        rs
+                self.style.item_color
+            },
+            rclicked: self.input.area_clicked(shape, PtrButton::RIGHT),
+            clicked: self.input.area_clicked(shape, PtrButton::LEFT),
+            clicked_elsewhere: self.input.area_outside_clicked(shape, PtrButton::LEFT),
+        }
     }
 }
 impl<'i, 'm> Painter<'i, 'm> {
     fn debug_shape(&mut self, shape: Rect) {
         if self.debug {
-            self.model.rect_outline(shape, 2.0, Color::RED.into());
+            self.model.rect_outline(shape, 2.0, Color::RED);
         }
     }
 
@@ -500,11 +501,8 @@ impl<'i, 'm> Painter<'i, 'm> {
             &MAIN_ATLAS.white,
             int.color,
         );
-        self.model.rect(
-            shape.shrink(self.style.button_margin),
-            tex,
-            Color::WHITE.into(),
-        );
+        self.model
+            .rect(shape.shrink(self.style.button_margin), tex, Color::WHITE);
         int
     }
     pub fn text_edit(&mut self, shape: Option<Rect>, hint: impl AsRef<str>, field: TextFieldMut) {
@@ -566,7 +564,7 @@ impl<'i, 'm> Painter<'i, 'm> {
         };
         self.debug_shape(Rect::from_min_size(vec2(min_x, min_y), size2));
         super::text::build_text(
-            &mut self.model,
+            self.model,
             text.as_ref(),
             scale as u32,
             vec2(min_x, min_y),
@@ -665,7 +663,7 @@ fn text_edit(shape: Rect, hint: impl AsRef<str>, field_mut: TextFieldMut, g: &mu
     }
 
     if field.focused {
-        if g.input.pasted_text().len() > 0 {
+        if !g.input.pasted_text().is_empty() {
             field.text += g.input.pasted_text();
         }
         if let Some(input) = &g.input.text_input() {
