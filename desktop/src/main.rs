@@ -14,8 +14,6 @@ use winit::event_loop::EventLoopBuilder;
 use winit::keyboard::{Key, NamedKey};
 use winit::window::Window;
 
-use clipboard::ClipboardProvider;
-
 struct SaveDirs {
     settings: PathBuf,
     library: PathBuf,
@@ -47,7 +45,7 @@ fn main() {
         input: InputState::default(),
         window,
         last_frame_time: SystemTime::now(),
-        clipboard: clipboard::ClipboardContext::new()
+        clipboard: arboard::Clipboard::new()
             .map_err(|err| log::warn!("Failed to init system clipboard: {err:?}"))
             .ok(),
         text_input: None,
@@ -91,7 +89,7 @@ struct State {
     window: Window,
     input: InputState,
     last_frame_time: SystemTime,
-    clipboard: Option<clipboard::ClipboardContext>,
+    clipboard: Option<arboard::Clipboard>,
     text_input: Option<TextInputState>,
     save_dirs: SaveDirs,
 
@@ -238,7 +236,7 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                         if smol_str.as_str() == "v" && ctx.input.modifiers().cmd {
                             // Paste command
                             if let Some(text) =
-                                ctx.clipboard.as_mut().and_then(|cb| cb.get_contents().ok())
+                                ctx.clipboard.as_mut().and_then(|cb| cb.get_text().ok())
                             {
                                 ctx.input.on_event(InputEvent::Paste(text));
                             }
@@ -248,7 +246,7 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                             // Copy command (For now we copy the entire active text field)
                             if let Some(input) = &ctx.text_input {
                                 if let Some(clipboard) = &mut ctx.clipboard {
-                                    _ = clipboard.set_contents(input.text.clone());
+                                    _ = clipboard.set_text(input.text.clone());
                                 }
                             }
                             return;
