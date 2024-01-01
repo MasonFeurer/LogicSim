@@ -14,10 +14,44 @@ import android.os.Build.VERSION_CODES;
 import android.os.Bundle;
 import android.view.View;
 import android.view.WindowManager;
+import android.view.inputmethod.InputMethodManager;
+import android.content.Context;
 
 public class MainActivity extends GameActivity {
     static {
         System.loadLibrary("main");
+    }
+
+    public void showSoftKeyboard() {
+        View content = findViewById(android.R.id.content);
+        if(content == null) {
+            System.out.println("findViewById(android.R.id.content) returned null");
+            return;
+        }
+        View view = content.getRootView();
+        if(view == null) {
+            System.out.println("getRootView() returned null");
+            return;
+        }
+        InputMethodManager imm = (InputMethodManager) view.getContext().getSystemService(
+                Context.INPUT_METHOD_SERVICE);
+        imm.toggleSoftInput(InputMethodManager.SHOW_FORCED, InputMethodManager.HIDE_IMPLICIT_ONLY);
+    }
+
+    public void hideSoftKeyboard() {
+        View content = findViewById(android.R.id.content);
+        if(content == null) {
+            System.out.println("findViewById(android.R.id.content) returned null");
+            return;
+        }
+        View view = content.getRootView();
+        if(view == null) {
+            System.out.println("getRootView() returned null");
+            return;
+        }
+        InputMethodManager imm = (InputMethodManager) view.getContext().getSystemService(
+                Context.INPUT_METHOD_SERVICE);
+        imm.hideSoftInputFromWindow(view.getWindowToken(), 0);
     }
 
     native void onDisplayInsets(int[] cutouts);
@@ -80,5 +114,10 @@ public class MainActivity extends GameActivity {
     protected void onResume() {
         super.onResume();
         hideSystemUI();
+
+        // View view = this.
+        // view.setFocusable(true);
+        // view.setFocusableInTouchMode(true);
+        // view.requestFocus();
     }
 }

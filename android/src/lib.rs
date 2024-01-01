@@ -126,8 +126,6 @@ impl TouchTranslater {
     }
 
     fn phase_start(&mut self, idx: usize, pos: Vec2, mut out: impl FnMut(LogisimInputEvent)) {
-        log::info!("Started motion: {idx} {pos:?}");
-
         self.pointer_count += 1;
         self.pointers.resize(idx + 1, None);
         self.pointers[idx] = Some(Ptr { pos });
@@ -284,11 +282,12 @@ fn android_main(android: AndroidApp) {
                 _ => {}
             }
 
-            let redraw = SystemTime::now()
-                .duration_since(last_frame_time)
-                .unwrap_or(Duration::ZERO)
-                .as_millis()
-                > (1000 / 60);
+            // let redraw = SystemTime::now()
+            //     .duration_since(last_frame_time)
+            //     .unwrap_or(Duration::ZERO)
+            //     .as_millis()
+            //     > (1000 / 60);
+            let redraw = true;
             if redraw && state.running {
                 // Update FPS
                 {
@@ -411,16 +410,21 @@ fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
     let out = &mut state.input;
     match event {
         InputEvent::KeyEvent(key_event) => {
+            let mut new_event = None;
             let combined_key_char = character_map_and_combine_key(
                 &state.android,
                 key_event,
                 &mut state.combining_accent,
+                &mut new_event,
             );
             match combined_key_char {
                 Some(KeyMapChar::Unicode(ch)) | Some(KeyMapChar::CombiningAccent(ch)) => {
                     out.on_event(LogisimInputEvent::Type(ch));
                 }
                 _ => {}
+            }
+            if let Some(event) = new_event {
+                state.input.on_event(event);
             }
         }
         InputEvent::MotionEvent(motion_event) => {
@@ -432,7 +436,6 @@ fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
 
             match motion_event.action() {
                 MotionAction::Down | MotionAction::PointerDown => {
-                    log::info!("Pressed pointer; idx: {idx}");
                     translater.phase_start(idx, pos, handler)
                 }
                 MotionAction::Up | MotionAction::PointerUp | MotionAction::Cancel => {
@@ -454,38 +457,12 @@ fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
                 }
             });
 
-            let mut info = TextInputState {
+            let info = TextInputState {
                 text: text_state.text.clone(),
                 selection: min..max,
                 compose,
             };
-            // Temporary fix for backspace deleting 2 characters on android keyboard.
-            if let Some(input) = &state.text_input {
-                if input.text.len().saturating_sub(info.text.len()) == 2 {
-                    info.text.push(input.text.chars().rev().nth(1).unwrap());
-                    info.selection.end += 1;
-                    if let Some(range) = &mut info.compose {
-                        range.end += 1;
-                    }
-                }
-
-                state
-                    .android
-                    .set_text_input_state(android_activity::input::TextInputState {
-                        text: info.text.clone(),
-                        selection: android_activity::input::TextSpan {
-                            start: info.selection.start as usize,
-                            end: info.selection.end as usize,
-                        },
-                        compose_region: info.compose.as_ref().map(|range| {
-                            android_activity::input::TextSpan {
-                                start: range.start as usize,
-                                end: range.end as usize,
-                            }
-                        }),
-                    });
-            }
-            log::info!("Android set TextInput to {info:?}");
+            log::info!("Android set text input to {info:?}");
             out.set_text_input(Some(info.clone()));
             state.text_input = Some(info);
         }
@@ -546,11 +523,35 @@ fn draw_frame(state: &mut State) {
     state.input.update();
     if state.text_input.is_none() && text_input.is_some() {
         log::info!("App started wanting text input ;' opening keyboard");
-        state.android.show_soft_input(true);
+
+        use jni::objects::JObject;
+        use jni::sys::jobject;
+        use jni::JavaVM;
+
+        let activity = state.android.activity_as_ptr();
+        let vm = unsafe { JavaVM::from_raw(state.android.vm_as_ptr() as *mut jni::sys::JavaVM) }
+            .unwrap();
+        let mut env = vm.get_env().unwrap();
+        let object = unsafe { JObject::from_raw(activity as jobject) };
+        if let Err(err) = env.call_method(object, "showSoftKeyboard", "()V", &[]) {
+            log::warn!("Error calling showSoftKeyboard : {err}");
+        }
     }
     if state.text_input.is_some() && text_input.is_none() {
+        use jni::objects::JObject;
+        use jni::sys::jobject;
+        use jni::JavaVM;
+
         log::info!("App stopped wanting text input ;' closing keyboard");
-        state.android.hide_soft_input(true);
+
+        let activity = state.android.activity_as_ptr();
+        let vm = unsafe { JavaVM::from_raw(state.android.vm_as_ptr() as *mut jni::sys::JavaVM) }
+            .unwrap();
+        let mut env = vm.get_env().unwrap();
+        let object = unsafe { JObject::from_raw(activity as jobject) };
+        if let Err(err) = env.call_method(object, "hideSoftKeyboard", "()V", &[]) {
+            log::warn!("Error calling hideSoftKeyboard : {err}");
+        }
     }
 
     if text_input.is_some() && text_input != state.text_input {
@@ -576,16 +577,30 @@ fn draw_frame(state: &mut State) {
 }
 
 /// Tries to map the `key_event` to a `KeyMapChar` containing a unicode character or dead key accent
-///
-/// This shows how to take a `KeyEvent` and look up its corresponding `KeyCharacterMap` and
-/// use that to try and map the `key_code` + `meta_state` to a unicode character or a
-/// dead key that be combined with the next key press.
 fn character_map_and_combine_key(
     android: &AndroidApp,
     key_event: &KeyEvent,
     combining_accent: &mut Option<char>,
+    logisim_event: &mut Option<logisim::input::InputEvent>,
 ) -> Option<KeyMapChar> {
     let device_id = key_event.device_id();
+
+    log::info!(
+        "Recieved KeyEvent {{ action: {:?}, key: {:?} }}",
+        key_event.action(),
+        key_event.key_code()
+    );
+
+    use android_activity::input::Keycode;
+    if key_event.key_code() == Keycode::Del {
+        use logisim::input::{InputEvent, Key};
+        match key_event.action() {
+            KeyAction::Up => *logisim_event = Some(InputEvent::PressKey(Key::Backspace)),
+            KeyAction::Down => *logisim_event = Some(InputEvent::ReleaseKey(Key::Backspace)),
+            _ => {}
+        }
+        return None;
+    }
 
     let key_map = match android.device_key_character_map(device_id) {
         Ok(key_map) => key_map,
@@ -617,7 +632,8 @@ fn character_map_and_combine_key(
                 *combining_accent = None;
                 combined_unicode.map(KeyMapChar::Unicode)
             } else {
-                Some(KeyMapChar::Unicode(unicode))
+                // Some(KeyMapChar::Unicode(unicode))
+                None
             }
         }
         Ok(KeyMapChar::CombiningAccent(accent)) => {
