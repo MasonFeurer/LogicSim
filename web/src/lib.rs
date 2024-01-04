@@ -3,16 +3,21 @@ use logisim_common as logisim;
 use logisim::app::{App, FrameOutput};
 use logisim::glam::{uvec2, vec2, UVec2, Vec2};
 use logisim::input::{InputEvent, InputState, PtrButton};
+use logisim::save::Library;
 use logisim::{log, Rect};
 
 use web_time::{Duration, SystemTime};
 
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::js_sys;
 
 use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
-use winit::event_loop::EventLoopBuilder;
+use winit::event_loop::{ControlFlow, EventLoopBuilder};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::Window;
+
+use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::Arc;
 
 pub fn get_os() -> Option<&'static str> {
     let mut os_name = "Unknown";
@@ -32,6 +37,12 @@ pub fn get_os() -> Option<&'static str> {
         os_name = "linux";
     }
     Some(os_name)
+}
+
+type MergeLibraries = (Arc<SyncSender<Library>>, Receiver<Library>);
+static mut MERGE_LIBRARIES: Option<MergeLibraries> = None;
+fn merge_libraries() -> &'static MergeLibraries {
+    unsafe { MERGE_LIBRARIES.as_ref().unwrap() }
 }
 
 struct State {
@@ -100,8 +111,23 @@ fn resize_canvas(canvas: &web_sys::HtmlCanvasElement, size: UVec2) -> Option<()>
     Some(())
 }
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static TRIGGERED_SAVE: AtomicBool = AtomicBool::new(false);
+
+#[wasm_bindgen]
+// Should be called by site script when the tab is about to be closed.
+pub async fn trigger_save() {
+    TRIGGERED_SAVE.store(true, Ordering::SeqCst);
+}
+
 #[wasm_bindgen]
 pub async fn main_web(canvas_id: &str) {
+    unsafe {
+        let (sender, receiver) = sync_channel(1000);
+        MERGE_LIBRARIES = Some((Arc::new(sender), receiver));
+    }
+
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
     _ = console_log::init();
 
@@ -134,18 +160,96 @@ pub async fn main_web(canvas_id: &str) {
     };
     state.app.external_data = true;
 
+    if let Some(data) = load_data("library") {
+        match bincode::deserialize(&data) {
+            Ok(library) => state.app.library = library,
+            Err(err) => log::warn!("Failed to parse library data in localStorage: {err:?}"),
+        }
+    }
+    if let Some(data) = load_data("scenes") {
+        match bincode::deserialize(&data) {
+            Ok(scenes) => state.app.scenes = scenes,
+            Err(err) => log::warn!("Failed to parse scenes data in localStorage: {err:?}"),
+        }
+    }
+    if let Some(data) = load_data("settings") {
+        match bincode::deserialize(&data) {
+            Ok(settings) => state.app.settings = settings,
+            Err(err) => log::warn!("Failed to parse settings data in localStorage: {err:?}"),
+        }
+    }
+
     log::info!("Starting app with size {size:?}");
     state.app.resume(&state.window, size).await;
     state.app.update_size(size);
     state.window.request_redraw();
 
-    event_loop.spawn(move |event, event_loop| {
+    event_loop.spawn(move |event, elwt| {
+        // merge imported libraries
+        if let Ok(lib2) = merge_libraries().1.try_recv() {
+            state.app.library.tables.extend(lib2.tables);
+            state
+                .app
+                .library
+                .chips
+                .extend(lib2.chips.into_iter().filter(|chip| !chip.builtin));
+        }
+
         let mut exit = false;
         on_event(&mut state, event, &mut exit);
         if exit {
-            event_loop.exit();
+            elwt.exit();
+        } else {
+            if TRIGGERED_SAVE
+                .compare_exchange(true, false, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+            {
+                log::info!("Saving app...");
+                let data = bincode::serialize(&state.app.library).unwrap();
+                save_data(&data, "library");
+                let data = bincode::serialize(&state.app.scenes).unwrap();
+                save_data(&data, "scenes");
+                let data = bincode::serialize(&state.app.settings).unwrap();
+                save_data(&data, "settings");
+            }
+
+            elwt.set_control_flow(ControlFlow::Wait);
         }
     });
+}
+
+/// Saves some data in the browsers `localStorage` with some key.
+fn save_data(data: &[u8], tag: &str) {
+    // The data stored in localStorage must be Strings.
+    // And this string must be valid UTF-8 (I tried constructing an illegal
+    // string with std::str::from_utf8_unchecked, but it was caught by the JS bindings).
+    // Converting the binary data to a string with the Display formatter,
+    // for example, would be very inefficient.
+    // So here, I make the array twice as large by splitting each byte into 2 4-bit integers,
+    // making a String that is guarenteed to be valid UTF-8.
+    // For example: [0b11010011, 0b0001001] (not valid ASCII, probably not valid UTF-8), gets
+    // converted into: [0b0011, 0b1101, 0b1001, 0b0001] (valid ASCII, thus valid UTF-8).
+    let mut data_wide = Vec::with_capacity(data.len() * 2);
+    for b in data {
+        // [LSW, MSW]
+        data_wide.push(*b & 0xF);
+        data_wide.push((*b & 0xF0) >> 4);
+    }
+    let data_str = unsafe { std::str::from_utf8_unchecked(&data_wide) };
+    let storage = web_sys::window().unwrap().local_storage().unwrap().unwrap();
+    storage.set(tag, data_str).unwrap();
+}
+
+/// Loads some data from the browsers `localStorage` with some key.
+fn load_data(tag: &str) -> Option<Vec<u8>> {
+    let storage = web_sys::window().unwrap().local_storage().unwrap().unwrap();
+    let bytes = storage.get(tag).unwrap().map(String::into_bytes)?;
+    assert!(bytes.len() % 2 == 0);
+    let mut out = Vec::with_capacity(bytes.len() / 2);
+    for idx in 0..bytes.len() / 2 {
+        out.push(bytes[idx * 2] | (bytes[idx * 2 + 1] << 4));
+    }
+    Some(out)
 }
 
 fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
@@ -153,15 +257,41 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         Event::Resumed => log::info!("Received Resumed Event"),
         Event::Suspended => log::info!("Received Suspended Event"),
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
-        Event::LoopExiting => {
-            let settings = bincode::serialize(&state.app.settings).unwrap();
-            let library = bincode::serialize(&state.app.library).unwrap();
-            let scene = bincode::serialize(&state.app.scene()).unwrap();
-            (_, _, _) = (settings, library, scene);
-            log::info!("TODO: SAVE APP STATE");
-        }
+        Event::LoopExiting => log::info!("Received LoopExiting Event"),
         _ => {}
     }
+}
+
+/// Downloads a chunk of binary data as a file with the name `filename`.
+fn download_data(data: &[u8], filename: &str) -> Result<(), wasm_bindgen::JsValue> {
+    // -- Create download URL --
+    // Safety: the u8_arr is valid as long as no new memory is allocated
+    let u8_arr = unsafe { js_sys::Uint8Array::view(&data) };
+
+    let seq = js_sys::Array::new_with_length(1);
+    seq.set(0, u8_arr.into());
+
+    let blob = web_sys::Blob::new_with_u8_array_sequence_and_options(
+        &seq,
+        web_sys::BlobPropertyBag::new().type_("application/octet-stream"),
+    )?;
+    let url = web_sys::Url::create_object_url_with_blob(&blob)?;
+    log::info!("Download data at URL {url:?} (should be invalid after download starts!)");
+
+    // -- Place download anchor in page --
+    let document = web_sys::window().unwrap().document().unwrap();
+    let anchor = document.create_element("a")?;
+    anchor.set_attribute("href", &url)?;
+    anchor.set_attribute("download", filename)?;
+    document.body().unwrap().append_child(&anchor)?;
+
+    // -- Click download anchor, triggering browser to download data --
+    anchor.unchecked_ref::<web_sys::HtmlElement>().click();
+
+    // -- Clean up --
+    document.body().unwrap().remove_child(&anchor)?;
+    web_sys::Url::revoke_object_url(&url)?;
+    Ok(())
 }
 
 fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
@@ -214,10 +344,26 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                     log::warn!("Failed to draw frame: {err:?}");
                 }
                 if out.download_data {
-                    log::info!("TODO: download data");
+                    log::info!("Downloading Library data...");
+                    let bytes = bincode::serialize(&ctx.app.library).unwrap();
+                    if let Err(err) = download_data(&bytes, "library.data") {
+                        log::error!("Error downloading library: {err:?}");
+                    }
                 }
                 if out.import_data {
-                    log::info!("TODO: import data");
+                    let sender = std::sync::Arc::clone(&merge_libraries().0);
+                    let future = async move {
+                        let entries = rfd::AsyncFileDialog::new().pick_files().await;
+                        for entry in entries.unwrap_or(Vec::new()) {
+                            let bytes = entry.read().await;
+                            let Ok(library) = bincode::deserialize::<Library>(&bytes) else {
+                                log::error!("failed to parse library {:?}", entry.file_name());
+                                continue;
+                            };
+                            sender.send(library).unwrap();
+                        }
+                    };
+                    wasm_bindgen_futures::spawn_local(future);
                 }
                 ctx.input.update();
                 ctx.window.request_redraw();
@@ -248,10 +394,12 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
             }
         }
         WindowEvent::MouseWheel { delta, .. } => match delta {
-            MouseScrollDelta::LineDelta(x, y) => ctx.input.on_event(InputEvent::Scroll(vec2(x, y))),
+            MouseScrollDelta::LineDelta(x, y) => {
+                ctx.input.on_event(InputEvent::Scroll(vec2(x, y) * 0.01))
+            }
             MouseScrollDelta::PixelDelta(pos) => ctx
                 .input
-                .on_event(InputEvent::Scroll(vec2(pos.x as f32, pos.y as f32))),
+                .on_event(InputEvent::Scroll(vec2(pos.x as f32, pos.y as f32) * 0.01)),
         },
         WindowEvent::TouchpadMagnify { delta, .. } => {
             if !ctx.input.ptr_gone() {

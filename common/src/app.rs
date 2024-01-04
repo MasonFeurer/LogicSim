@@ -173,7 +173,7 @@ pub fn show_info_menu(bounds: &mut Rect, p: &mut Painter, screen: Rect, state: &
     p.seperator();
 
     p.text(None, "Developer: Mason Feurer");
-    p.text(None, "Version: 0.0.1 (dev)");
+    p.text(None, "Version: 0.1 (dev)");
     let platform = format!(
         "Platform: {} ({})",
         std::env::consts::OS,
