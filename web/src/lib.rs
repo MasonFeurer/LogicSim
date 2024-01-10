@@ -266,7 +266,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
 fn download_data(data: &[u8], filename: &str) -> Result<(), wasm_bindgen::JsValue> {
     // -- Create download URL --
     // Safety: the u8_arr is valid as long as no new memory is allocated
-    let u8_arr = unsafe { js_sys::Uint8Array::view(&data) };
+    let u8_arr = unsafe { js_sys::Uint8Array::view(data) };
 
     let seq = js_sys::Array::new_with_length(1);
     seq.set(0, u8_arr.into());
@@ -333,14 +333,16 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                 let content_rect = Rect::from_min_size(Vec2::ZERO, screen_size.as_vec2());
 
                 ctx.last_frame_time = SystemTime::now();
+                ctx.input.millis = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .as_ref()
+                    .map(Duration::as_millis)
+                    .unwrap_or(0);
                 let mut out = FrameOutput::default();
-                if let Err(err) = ctx.app.draw_frame(
-                    &mut ctx.input,
-                    content_rect,
-                    &mut Default::default(),
-                    ctx.fps,
-                    &mut out,
-                ) {
+                if let Err(err) =
+                    ctx.app
+                        .draw_frame(&mut ctx.input, content_rect, ctx.fps, &mut out)
+                {
                     log::warn!("Failed to draw frame: {err:?}");
                 }
                 if out.download_data {

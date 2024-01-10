@@ -139,6 +139,15 @@ impl ModelBuilder {
     }
 
     pub fn curve(&mut self, points: [Vec2; 3], detail: u32, w: f32, color: Color) {
+        if points[1] == points[2] || points[2].x.is_nan() || points[2].y.is_nan() {
+            self.line([points[0], points[1]], w, &MAIN_ATLAS.white, color);
+            return;
+        }
+        if points[1] == points[0] || points[0] == Vec2::splat(f32::NAN) {
+            self.line([points[2], points[1]], w, &MAIN_ATLAS.white, color);
+            return;
+        }
+
         let [a, ctrl, b] = points;
         let mut prev_point = a;
         for step in 1..=detail {

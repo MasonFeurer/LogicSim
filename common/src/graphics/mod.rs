@@ -11,6 +11,42 @@ pub use renderer::*;
 use glam::{vec2, vec4, Vec2, Vec4};
 use serde::{Deserialize, Serialize};
 
+// http://www.sunshine2k.de/coding/java/PointOnLine/PointOnLine.html
+pub fn project_point_onto_line(p: Vec2, line: (Vec2, Vec2)) -> Vec2 {
+    let (v1, v2) = line;
+
+    // get dot product of e1, e2
+    let e1 = vec2(v2.x - v1.x, v2.y - v1.y);
+    let e2 = vec2(p.x - v1.x, p.y - v1.y);
+    let dot = e1.x * e2.x + e1.y * e2.y;
+
+    // get squared length of e1
+    let len_sq = e1.x * e1.x + e1.y * e1.y;
+
+    let result_x = v1.x + (dot * e1.x) / len_sq;
+    let result_y = v1.y + (dot * e1.y) / len_sq;
+    vec2(result_x, result_y)
+}
+pub fn line_contains_point(line: (Vec2, Vec2), width: f32, point: Vec2) -> bool {
+    let max_dist_sq = width * width;
+
+    let projected = project_point_onto_line(point, line);
+
+    let pp = projected - point;
+    let dist_sq = (pp.x * pp.x + pp.y * pp.y).abs();
+
+    let line_min_x = line.0.x.min(line.1.x);
+    let line_max_x = line.0.x.max(line.1.x);
+    let line_min_y = line.0.y.min(line.1.y);
+    let line_max_y = line.0.y.max(line.1.y);
+
+    dist_sq <= max_dist_sq
+        && projected.x >= line_min_x
+        && projected.x <= line_max_x
+        && projected.y >= line_min_y
+        && projected.y <= line_max_y
+}
+
 #[derive(Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Color(pub u32);
 impl Color {
@@ -167,9 +203,10 @@ impl Rect {
     }
 
     #[inline(always)]
-    pub fn translate(&mut self, v: Vec2) {
+    pub fn translate(&mut self, v: Vec2) -> &mut Self {
         self.min += v;
         self.max += v;
+        self
     }
 
     #[inline(always)]

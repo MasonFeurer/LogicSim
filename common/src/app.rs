@@ -1,7 +1,7 @@
 use crate::gpu::Gpu;
-use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style, TextFieldAttrs};
+use crate::graphics::ui::{Align2, CycleState, MenuPainter, Painter, Style};
 use crate::graphics::{Color, ModelBuilder, Rect, Renderer, Transform, MAIN_ATLAS};
-use crate::input::{InputState, Key, PtrButton, TextInputState};
+use crate::input::{InputState, Key, PtrButton};
 use crate::Id;
 
 use crate::sim::save::{ChipAttrs, ChipSave, IoType, ItemColor, Library};
@@ -152,7 +152,6 @@ pub enum Menu {
 
 #[derive(Default)]
 pub struct UiState {
-    save_name_field: TextFieldAttrs,
     chip_context: Option<SceneId>,
     library_sel: Option<usize>,
     open_menu: Option<Menu>,
@@ -244,11 +243,12 @@ pub fn show_save_menu(
 
     p.text_lg(None, "Save to Chip");
     p.seperator();
-    p.text_edit(None, "Name", state.save_name_field.as_mut(&mut attrs.name));
+    p.text_edit(None, Id::new("_name"), "Name", &mut attrs.name);
 
-    p.push_style(|style| style.text_color = attrs.color.as_color());
+    let old_style = p.style.clone();
+    p.style.text_color = attrs.color.as_color();
     p.cycle(None, &mut attrs.color, &mut false);
-    p.pop_style();
+    p.style = old_style;
 
     p.cycle(None, &mut attrs.logic, &mut false);
     if p.button(None, "Close").clicked {
@@ -374,6 +374,7 @@ pub fn show_overlay(
     screen: Rect,
     fps: u32,
     state: &mut UiState,
+    placing_wire: &mut bool,
     scene: &mut Scene,
 ) {
     // Menu buttons (top-left)
@@ -388,6 +389,9 @@ pub fn show_overlay(
     }
     if mp.image_button(None, &MAIN_ATLAS["add_icon"]).clicked {
         state.open_menu = Some(Menu::Save);
+    }
+    if *placing_wire && mp.image_button(None, &MAIN_ATLAS["cancel_icon"]).clicked {
+        *placing_wire = false;
     }
 
     let name = if scene.save_attrs.name.is_empty() {
@@ -439,7 +443,7 @@ pub fn show_device_list(
 
     let mut p = MenuPainter::new(bounds, p);
     p.start(screen.tr(), Align2::TOP_RIGHT, Align2::MIN, Vec2::X);
-    p.fit_button_text = true;
+    p.style.fit_button_text = true;
 
     let b_size = p.style().item_size.y * 0.5;
 
@@ -472,7 +476,9 @@ pub fn show_device_list(
         Align2::MIN,
         Vec2::Y,
     );
-    p.push_style(|style| style.item_size *= 0.5);
+
+    let old_style = p.style.clone();
+    p.style.item_size *= 0.5;
 
     for (idx, chip) in library.chips.iter().enumerate() {
         if state.device_list_filter.is_some() && state.device_list_filter != Some(chip.attrs.color)
@@ -488,7 +494,7 @@ pub fn show_device_list(
             state.library_sel = Some(idx);
         }
     }
-    p.pop_style();
+    p.style = old_style;
 }
 
 pub fn show_device_placer(
@@ -612,6 +618,7 @@ pub struct App {
     pub device_placer: DevicePlacer,
     pub ui_state: UiState,
     pub start_wire: Option<(NodeIdent, NodeAddr)>,
+    pub wire_anchors: Vec<Vec2>,
     pub commands: Vec<Cmd>,
 }
 impl App {
@@ -677,7 +684,6 @@ impl App {
         &mut self,
         input: &mut InputState,
         content_rect: Rect,
-        text_input: &mut Option<TextInputState>,
         fps: u32,
         out: &mut FrameOutput,
     ) -> Result<(), String> {
@@ -706,6 +712,10 @@ impl App {
             self.ui_state.open_menu = Some(Menu::Save);
         }
         if input.key_pressed(Key::Esc) {
+            if self.ui_state.open_menu.is_none() {
+                self.start_wire = None;
+                self.wire_anchors = Vec::new();
+            }
             self.ui_state.open_menu = None;
         }
         if input.key_pressed(Key::F3) && input.modifiers().cmd {
@@ -807,7 +817,8 @@ impl App {
 
         painter.set_transform(self.scenes[self.open_scene].transform);
         painter.covered = self.ui_state.open_menu.is_some();
-        let scene_rs = self.scenes[self.open_scene].draw(&mut painter, &mut scene_hovered);
+        let scene_rs = self.scenes[self.open_scene].draw(&mut painter);
+        scene_hovered &= !scene_rs.item_hovered;
         painter.covered = false;
 
         if let Some(id) = scene_rs.rclicked_chip {
@@ -817,23 +828,41 @@ impl App {
         // ---- Handle node clicks ----
         if let Some(addr) = scene_rs.toggle_node_state {
             let node = self.scenes[self.open_scene].sim.mut_node(addr);
-            node.set_state(!node.state());
+            node.toggle_state();
         }
         if let Some((ident, addr)) = scene_rs.clicked_node {
             if let Some((ident2, addr2)) = self.start_wire {
                 if ident2 != ident {
                     self.start_wire = None;
+                    _ = self.scenes[self.open_scene].rm_wire_by_target(addr);
 
-                    let src = Source::new_copy(addr2);
+                    let src = Source::new_addr(addr2);
                     self.scenes[self.open_scene].sim.nodes[addr.0 as usize].set_source(src);
                     self.scenes[self.open_scene].wires.push(Wire {
                         input: ident2,
                         output: ident,
-                        anchors: vec![],
+                        anchors: self.wire_anchors.clone(),
                     });
+                    self.wire_anchors.clear();
                 }
             } else {
                 self.start_wire = Some((ident, addr));
+            }
+        }
+
+        // ---- Draw Wire Being Placed ----
+        if let Some((ident, _addr)) = self.start_wire {
+            if let Some(info) = self.scenes[self.open_scene].node_info(ident) {
+                let state = self.scenes[self.open_scene].sim.get_node(info.addr).state();
+                let dst = painter.transform.inv() * painter.input().ptr_pos();
+                crate::scene::draw_wire(
+                    &mut painter,
+                    state,
+                    true,
+                    info.pos,
+                    dst,
+                    &self.wire_anchors,
+                );
             }
         }
 
@@ -885,6 +914,15 @@ impl App {
                 .zoom(anchor, delta * 0.1, 0.1..=100.0);
         }
 
+        // ---- Place Wire Anchors
+        if scene_hovered {
+            if let Some((button, pos)) = painter.input.ptr_click() {
+                if button == PtrButton::LEFT {
+                    self.wire_anchors.push(painter.transform.inv() * pos);
+                }
+            }
+        }
+
         // ---- Draw UI & Menus ----
         match self.ui_state.open_menu {
             Some(Menu::Options) => show_options_menu(
@@ -928,14 +966,20 @@ impl App {
                 &mut self.commands,
             ),
             None => {
+                let mut placing_wire = self.start_wire.is_some();
                 show_overlay(
                     &mut self.overlay_ui,
                     &mut painter,
                     content_rect,
                     fps,
                     &mut self.ui_state,
+                    &mut placing_wire,
                     &mut self.scenes[self.open_scene],
                 );
+                if !placing_wire {
+                    self.start_wire = None;
+                    self.wire_anchors = Vec::new();
+                }
                 show_device_list(
                     &mut self.device_list_ui,
                     &mut painter,
@@ -948,7 +992,6 @@ impl App {
         };
 
         // ---- Finish Drawing ----
-        *text_input = painter.output.text_input.clone();
         let bg = Some(painter.style().background);
         renderer
             .render(gpu, bg, [&model.finish(&gpu.device)])
@@ -962,13 +1005,13 @@ pub fn create_chip_save(scene: &Scene) -> ChipSave {
         .l_nodes
         .states
         .iter()
-        .map(|addr| (String::from(""), *addr, scene.sim.get_node(*addr)))
+        .map(|(addr, name)| (name.clone(), *addr, scene.sim.get_node(*addr)))
         .collect();
     let r_nodes = scene
         .r_nodes
         .states
         .iter()
-        .map(|addr| (String::from(""), *addr, scene.sim.get_node(*addr)))
+        .map(|(addr, name)| (name.clone(), *addr, scene.sim.get_node(*addr)))
         .collect();
     let mut inner_nodes = Vec::new();
     for device in scene.devices.values() {
@@ -1001,7 +1044,7 @@ pub fn place_chip(
 
     fn io_ty(node: &Node) -> IoType {
         match node.source().ty() {
-            SourceTy::None => IoType::Input,
+            SourceTy::NONE => IoType::Input,
             _ => IoType::Output,
         }
     }

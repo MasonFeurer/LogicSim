@@ -2,7 +2,7 @@
 
 use logisim_common as logisim;
 
-use logisim::glam::vec2;
+use logisim::glam::{vec2, Vec2};
 use logisim::input::{InputEvent, InputState, PtrButton, TextInputState};
 use logisim::{app::App, Rect};
 
@@ -50,6 +50,7 @@ fn main() {
             .ok(),
         text_input: None,
         save_dirs: SaveDirs::new(),
+        ptr_press: None,
 
         frame_count: 0,
         last_fps_update: SystemTime::now(),
@@ -92,6 +93,7 @@ struct State {
     clipboard: Option<arboard::Clipboard>,
     text_input: Option<TextInputState>,
     save_dirs: SaveDirs,
+    ptr_press: Option<(PtrButton, Vec2, SystemTime)>,
 
     frame_count: u32,
     last_fps_update: SystemTime,
@@ -171,11 +173,15 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                     }
                 }
 
+                ctx.input.millis = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .as_ref()
+                    .map(Duration::as_millis)
+                    .unwrap_or(0);
                 ctx.last_frame_time = SystemTime::now();
                 if let Err(err) = ctx.app.draw_frame(
                     &mut ctx.input,
                     content_rect,
-                    &mut ctx.text_input,
                     ctx.fps,
                     &mut Default::default(),
                 ) {
@@ -206,9 +212,23 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
             };
             let pos = ctx.input.ptr_pos();
             if state == ElementState::Pressed {
-                ctx.input.on_event(InputEvent::Click(pos, button));
                 ctx.input.on_event(InputEvent::Press(pos, button));
+                ctx.ptr_press = Some((button, pos, SystemTime::now()));
             } else {
+                if let Some((press_button, press_pos, instant)) = ctx.ptr_press {
+                    // if we've pressed the same button at a close position within the past 2 seconds, register a click.
+                    if press_button == button
+                        && (pos - press_pos).abs().length_squared() < 5.0
+                        && SystemTime::now()
+                            .duration_since(instant)
+                            .map(|d| d.as_secs() < 2)
+                            .ok()
+                            == Some(true)
+                    {
+                        ctx.input.on_event(InputEvent::Click(press_pos, button));
+                    }
+                    ctx.ptr_press = None;
+                }
                 ctx.input.on_event(InputEvent::Release(button));
             }
         }

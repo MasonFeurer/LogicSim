@@ -20,6 +20,7 @@ pub struct Style {
     pub button_margin: Vec2,
     pub item_align: Align,
     pub text_align: Align2,
+    pub fit_button_text: bool,
 }
 impl Default for Style {
     fn default() -> Self {
@@ -39,29 +40,7 @@ impl Default for Style {
             button_margin: Vec2::splat(5.0),
             item_align: Align::Center,
             text_align: Align2::CENTER,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-pub enum Dir {
-    Px,
-    Nx,
-    Py,
-    Ny,
-}
-impl Dir {
-    pub const LEFT: Self = Self::Nx;
-    pub const RIGHT: Self = Self::Px;
-    pub const UP: Self = Self::Ny;
-    pub const DOWN: Self = Self::Py;
-
-    pub fn as_vec2(self) -> Vec2 {
-        match self {
-            Self::Px => vec2(1.0, 0.0),
-            Self::Nx => vec2(-1.0, 0.0),
-            Self::Ny => vec2(0.0, -1.0),
-            Self::Py => vec2(0.0, 1.0),
+            fit_button_text: false,
         }
     }
 }
@@ -253,9 +232,7 @@ impl Placer {
 
 #[derive(Default, Clone)]
 pub struct PainterOutput {
-    pub hovered: Option<Id>,
     pub text_input: Option<TextInputState>,
-    pub drag_input: bool,
 }
 
 pub struct MenuPainter<'i, 'm, 'x, 'y> {
@@ -308,29 +285,23 @@ impl<'i, 'm, 'x, 'y> std::ops::DerefMut for MenuPainter<'i, 'm, 'x, 'y> {
 
 pub struct Painter<'i, 'm> {
     pub covered: bool,
+    pub debug: bool,
     pub transform: Transform,
     pub placer: Placer,
     pub style: Style,
-    pub original_style: Option<Style>,
     pub input: &'i mut InputState,
     pub model: &'m mut ModelBuilder,
-    pub output: PainterOutput,
-    pub debug: bool,
-    pub fit_button_text: bool,
 }
 impl<'i, 'm> Painter<'i, 'm> {
     pub fn new(style: Style, input: &'i mut InputState, model: &'m mut ModelBuilder) -> Self {
         Self {
             covered: false,
+            debug: false,
             transform: Transform::default(),
             placer: Placer::default(),
             style,
-            original_style: None,
             input,
             model,
-            output: PainterOutput::default(),
-            debug: false,
-            fit_button_text: false,
         }
     }
 
@@ -364,15 +335,6 @@ impl<'i, 'm> Painter<'i, 'm> {
     }
     pub fn style_mut(&mut self) -> &mut Style {
         &mut self.style
-    }
-    pub fn push_style(&mut self, f: impl FnOnce(&mut Style)) {
-        self.original_style = Some(self.style.clone());
-        f(&mut self.style);
-    }
-    pub fn pop_style(&mut self) {
-        if let Some(style) = self.original_style.take() {
-            self.style = style;
-        }
     }
 
     pub fn input(&self) -> &InputState {
@@ -429,6 +391,56 @@ impl<'i, 'm> Painter<'i, 'm> {
             rclicked: self.input.area_clicked(shape, PtrButton::RIGHT),
             clicked: self.input.area_clicked(shape, PtrButton::LEFT),
             clicked_elsewhere: self.input.area_outside_clicked(shape, PtrButton::LEFT),
+        }
+    }
+
+    pub fn interact_hovered(&mut self, hovered: bool) -> Interaction {
+        if self.covered {
+            return Interaction {
+                color: self.style.item_color,
+                ..Default::default()
+            };
+        }
+        Interaction {
+            hovered,
+            color: if hovered {
+                if self.input.ptr_down(PtrButton::LEFT) {
+                    self.style.item_press_color
+                } else {
+                    self.style.item_hover_color
+                }
+            } else {
+                self.style.item_color
+            },
+            rclicked: hovered && self.input.ptr_clicked(PtrButton::RIGHT),
+            clicked: hovered && self.input.ptr_clicked(PtrButton::LEFT),
+            clicked_elsewhere: false, // placeholder value until InputState can check if some arbitrary shape has been clicked.
+        }
+    }
+
+    pub fn interact_line(&mut self, line: [Vec2; 2], w: f32) -> Interaction {
+        if self.covered {
+            return Interaction {
+                color: self.style.item_color,
+                ..Default::default()
+            };
+        }
+        let [a, b] = [self.transform * line[0], self.transform * line[1]];
+        let hovered = super::line_contains_point((a, b), w, self.input.ptr_pos());
+        Interaction {
+            hovered,
+            color: if hovered {
+                if self.input.ptr_down(PtrButton::LEFT) {
+                    self.style.item_press_color
+                } else {
+                    self.style.item_hover_color
+                }
+            } else {
+                self.style.item_color
+            },
+            rclicked: hovered && self.input.ptr_clicked(PtrButton::RIGHT),
+            clicked: hovered && self.input.ptr_clicked(PtrButton::LEFT),
+            clicked_elsewhere: false, // placeholder value until InputState can check if some arbitrary shape has been clicked.
         }
     }
 }
@@ -505,9 +517,15 @@ impl<'i, 'm> Painter<'i, 'm> {
             .rect(shape.shrink(self.style.button_margin), tex, Color::WHITE);
         int
     }
-    pub fn text_edit(&mut self, shape: Option<Rect>, hint: impl AsRef<str>, field: TextFieldMut) {
+    pub fn text_edit(
+        &mut self,
+        shape: Option<Rect>,
+        id: Id,
+        hint: impl AsRef<str>,
+        text: &mut String,
+    ) {
         let shape = shape.unwrap_or_else(|| self.placer.next(self.style.item_size));
-        text_edit(shape, hint, field, self)
+        text_edit(shape, id, hint, text, self)
     }
     pub fn cycle<S: CycleState>(
         &mut self,
@@ -605,49 +623,10 @@ pub trait CycleState {
     fn label(&self) -> &'static str;
 }
 
-pub struct TextFieldMut<'a, 'b> {
-    pub text: &'a mut String,
-    pub focused: &'b mut bool,
-    pub cursor: &'b mut u32,
-}
+fn text_edit(shape: Rect, id: Id, hint: impl AsRef<str>, text: &mut String, g: &mut Painter) {
+    // note: Most of this assumes an ASCII only string, which currently is the case,
+    // but this will have to be redone if ever any plans to support more of UTF-8
 
-#[derive(Default)]
-pub struct TextFieldAttrs {
-    pub focused: bool,
-    pub cursor: u32,
-}
-impl<'b> TextFieldAttrs {
-    pub fn as_mut<'a>(&'b mut self, text: &'a mut String) -> TextFieldMut<'a, 'b> {
-        TextFieldMut {
-            text,
-            focused: &mut self.focused,
-            cursor: &mut self.cursor,
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct TextField {
-    pub text: String,
-    pub focused: bool,
-    pub cursor: u32,
-}
-impl<'a> TextField {
-    pub fn as_mut(&'a mut self) -> TextFieldMut<'a, 'a> {
-        TextFieldMut {
-            text: &mut self.text,
-            focused: &mut self.focused,
-            cursor: &mut self.cursor,
-        }
-    }
-}
-
-fn text_edit(shape: Rect, hint: impl AsRef<str>, field_mut: TextFieldMut, g: &mut Painter) {
-    let mut field = TextField {
-        text: field_mut.text.clone(),
-        focused: *field_mut.focused,
-        cursor: *field_mut.cursor,
-    };
     let hint = hint.as_ref();
     let Interaction {
         color,
@@ -655,86 +634,107 @@ fn text_edit(shape: Rect, hint: impl AsRef<str>, field_mut: TextFieldMut, g: &mu
         clicked_elsewhere,
         ..
     } = g.interact(shape);
+    let mut active_field = g.input.active_text_field.clone();
+    let mut is_focused = active_field.as_ref().map(|s| s.id == id) == Some(true);
 
     if clicked {
-        field.focused = true;
-    } else if clicked_elsewhere {
-        field.focused = false;
+        active_field = Some(TextInputState {
+            id,
+            text: text.clone(),
+            cursor: text.len() as u32,
+            compose: None,
+            blink_timer: g.input.millis,
+        })
+    } else if clicked_elsewhere && is_focused {
+        active_field = None;
+        is_focused = false;
     }
 
-    if field.focused {
-        if !g.input.pasted_text().is_empty() {
-            field.text += g.input.pasted_text();
-        }
-        if let Some(input) = &g.input.text_input() {
-            field.text = input.text.clone();
-            field.cursor = input.selection.end;
-        } else if g.input.key_pressed(Key::Backspace) {
-            if field.text.pop().is_some() {
-                field.cursor -= 1;
+    if let Some(field) = &mut active_field {
+        if is_focused {
+            let insert_idx = field.cursor as usize;
+            let mut reset_blinking = false;
+            if !g.input.pasted_text().is_empty() {
+                field.text += g.input.pasted_text();
+                reset_blinking = true;
             }
-        } else if g.input.key_pressed(Key::Space) {
-            field.text.push(' ');
-            field.cursor += 1;
-        } else if g.input.key_pressed(Key::Tab) {
-            field.text.push('\t');
-            field.cursor += 1;
-        } else if let Some(ch) = g.input.char_press() {
-            field.text.push(ch);
-            field.cursor += 1;
+            if g.input.key_pressed(Key::Backspace) {
+                if insert_idx > 0 {
+                    field.text.remove(insert_idx - 1);
+                    field.cursor -= 1;
+                }
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::Space) {
+                field.text.insert(insert_idx, ' ');
+                field.cursor += 1;
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::Tab) {
+                field.text.insert(insert_idx, '\t');
+                field.cursor += 1;
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::Left) {
+                if field.cursor > 0 {
+                    field.cursor -= 1;
+                }
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::Right) {
+                if field.cursor < field.text.len() as u32 {
+                    field.cursor += 1;
+                }
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::Home) {
+                field.cursor = 0;
+                reset_blinking = true;
+            } else if g.input.key_pressed(Key::End) {
+                field.cursor = (field.text.len()) as u32;
+                reset_blinking = true;
+            } else if let Some(ch) = g.input.char_press() {
+                field.text.insert(insert_idx, ch);
+                field.cursor += 1;
+                reset_blinking = true;
+            }
+            if reset_blinking {
+                field.blink_timer = g.input.millis;
+            }
+            *text = field.text.clone();
         }
-        g.output.text_input = Some(TextInputState {
-            text: field.text.clone(),
-            selection: field.cursor..field.cursor,
-            compose: Some(field.cursor..field.cursor + 1),
-        });
     }
-
-    field.cursor = field.text.len() as u32;
+    g.input.active_text_field = active_field;
     g.model.rect(shape, &MAIN_ATLAS.white, color);
-    if field.focused {
+    if is_focused {
         g.model.rect_outline(shape, 2.0, g.style.text_color);
 
-        // CURSOR:
-        // let sc = shape.height();
-        // let char_idx = if field.cursor == 0 {
-        //     0
-        // } else {
-        //     field
-        //         .text
-        //         .char_indices()
-        //         .nth(field.cursor as usize - 1)
-        //         .unwrap_or((0, '\0'))
-        //         .0
-        // };
-        // let text_before_cursor = if field.cursor == 0 {
-        //     ""
-        // } else {
-        //     &field.text[0..char_idx]
-        // };
-        // let offset = painter.text_size(text_before_cursor, sc).x;
-        // let min = shape.min + vec2(offset, sc * 0.05);
-        // let size = vec2(sc * 0.1, sc * 0.9);
+        let field = g.input.active_text_field.as_ref().unwrap();
 
-        // let color = painter.style.text_color;
-        // let rect = Rect::from_min_size(min, size);
-        // painter.model.rect(rect, &MAIN_ATLAS.white, color);
+        // --- Draw Cursor ----
+        let cursor_byte_idx = field.cursor as usize;
+        let text_before_cursor = &field.text[0..cursor_byte_idx];
+        let cursor_offset = g.text_size(text_before_cursor, g.style.text_size).x;
+
+        let cursor_rect = Rect::from_min_size(
+            vec2(shape.min.x + cursor_offset, shape.min.y),
+            vec2(2.0, g.style.text_size),
+        );
+        if g.input.millis - field.blink_timer < 400 {
+            g.model
+                .rect(cursor_rect, &MAIN_ATLAS.white, g.style.text_color);
+        }
+        if g.input.millis - field.blink_timer > 800 {
+            g.input.active_text_field.as_mut().unwrap().blink_timer = g.input.millis;
+        }
     }
 
-    let text_color = match field.text.is_empty() {
+    let text_color = match text.is_empty() {
         true => g.style.text_color.darken(120),
         false => g.style.text_color,
     };
-    let text: &str = match field.text.is_empty() {
+    let text: &str = match text.is_empty() {
         true => hint,
-        false => &field.text,
+        false => text,
     };
 
     if !text.is_empty() {
         let size = g.text_size(text, g.style.text_size);
         g.place_text(shape, (text, size), text_color, Align2::MIN);
     }
-    *field_mut.text = field.text.clone();
-    *field_mut.focused = field.focused;
-    *field_mut.cursor = field.cursor;
 }

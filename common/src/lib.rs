@@ -13,7 +13,9 @@ pub use glam;
 pub use log;
 pub use wgpu;
 
-#[derive(Hash, Debug, Eq, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Default, Hash, Debug, Eq, PartialEq, Clone, Copy, serde::Serialize, serde::Deserialize,
+)]
 pub struct Id(pub u64);
 impl Id {
     pub fn new<T: std::hash::Hash>(v: T) -> Self {

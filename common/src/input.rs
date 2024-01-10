@@ -1,11 +1,13 @@
 use crate::graphics::Rect;
 use crate::Id;
-use glam::{vec2, Vec2};
+use glam::Vec2;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub struct TextInputState {
+    pub blink_timer: u128,
+    pub id: Id,
     pub text: String,
-    pub selection: std::ops::Range<u32>,
+    pub cursor: u32,
     pub compose: Option<std::ops::Range<u32>>,
 }
 
@@ -58,15 +60,18 @@ pub struct InputState {
     char_press: Option<char>,
 
     ptr_pos: Option<Vec2>,
+    visible_ptr_pos: Vec2,
     prev_ptr_pos: Option<Vec2>,
     drag: Option<Drag>,
 
     modifiers: Modifiers,
     pasted_text: String,
     down_ptr_buttons: [bool; 5],
-    text_input: Option<TextInputState>,
     scroll: Vec2,
     zoom: Option<(Vec2, f32)>,
+
+    pub millis: u128,
+    pub active_text_field: Option<TextInputState>,
 }
 impl InputState {
     pub fn update_drag(&mut self, id: Id, bounds: Rect, anchor: Vec2, button: PtrButton) {
@@ -137,14 +142,6 @@ impl InputState {
         self.char_press
     }
     #[inline(always)]
-    pub fn text_input(&self) -> Option<TextInputState> {
-        self.text_input.clone()
-    }
-    #[inline(always)]
-    pub fn set_text_input(&mut self, input: Option<TextInputState>) {
-        self.text_input = input;
-    }
-    #[inline(always)]
     pub fn modifiers(&self) -> Modifiers {
         self.modifiers.clone()
     }
@@ -167,8 +164,16 @@ impl InputState {
         self.ptr_press.map(|press| press.0) == Some(button)
     }
     #[inline(always)]
+    pub fn ptr_press(&self) -> Option<(PtrButton, Vec2)> {
+        self.ptr_press
+    }
+    #[inline(always)]
     pub fn ptr_clicked(&self, button: PtrButton) -> bool {
         self.ptr_click.map(|click| click.0) == Some(button)
+    }
+    #[inline(always)]
+    pub fn ptr_click(&self) -> Option<(PtrButton, Vec2)> {
+        self.ptr_click
     }
 
     #[inline(always)]
@@ -200,7 +205,7 @@ impl InputState {
     // ---- Pointer Location Input ----
     #[inline(always)]
     pub fn ptr_pos(&self) -> Vec2 {
-        self.ptr_pos.unwrap_or(vec2(-1.0, -1.0))
+        self.ptr_pos.unwrap_or(self.visible_ptr_pos)
     }
     #[inline(always)]
     pub fn ptr_gone(&self) -> bool {
@@ -249,7 +254,10 @@ impl InputState {
                 }
                 self.down_ptr_buttons[usize::from(button)] = false;
             }
-            InputEvent::Hover(pos) => self.ptr_pos = Some(pos),
+            InputEvent::Hover(pos) => {
+                self.ptr_pos = Some(pos);
+                self.visible_ptr_pos = pos;
+            }
             InputEvent::Type(ch) => self.char_press = Some(ch),
             InputEvent::PressKey(key) => {
                 self.key_press = Some(key);

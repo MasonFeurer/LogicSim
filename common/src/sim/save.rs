@@ -47,12 +47,12 @@ impl Default for Library {
                 "out".into(),
                 sim::NodeAddr(2),
                 sim::Node::new(
-                    false,
-                    sim::Source::new_table(sim::TruthTableSource {
-                        inputs: sim::NodeAddr(0),
-                        output: 0,
-                        id: sim::TruthTableId(0),
-                    }),
+                    0,
+                    sim::Source::new_table(sim::TruthTableSource::new(
+                        sim::TruthTableId(0),
+                        0,
+                        sim::NodeAddr(0),
+                    )),
                 ),
             )],
             inner_nodes: vec![],
@@ -71,12 +71,12 @@ impl Default for Library {
                 "out".into(),
                 sim::NodeAddr(1),
                 sim::Node::new(
-                    false,
-                    sim::Source::new_table(sim::TruthTableSource {
-                        inputs: sim::NodeAddr(0),
-                        output: 0,
-                        id: sim::TruthTableId(1),
-                    }),
+                    0,
+                    sim::Source::new_table(sim::TruthTableSource::new(
+                        sim::TruthTableId(1),
+                        0,
+                        sim::NodeAddr(0),
+                    )),
                 ),
             )],
             inner_nodes: vec![],
@@ -216,7 +216,7 @@ impl ChipSave {
     pub fn preview(&self, pos: Vec2, rotation: scene::Rotation) -> scene::Chip {
         fn io_ty(node: &sim::Node) -> IoType {
             match node.source().ty() {
-                sim::SourceTy::None => IoType::Input,
+                sim::SourceTy::NONE => IoType::Input,
                 _ => IoType::Output,
             }
         }

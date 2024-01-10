@@ -446,25 +446,25 @@ fn handle_input_event(state: &mut State, event: &InputEvent) -> InputStatus {
             }
         }
         InputEvent::TextEvent(text_state) => {
-            let min = text_state.selection.start.min(text_state.selection.end) as u32;
-            let max = text_state.selection.start.max(text_state.selection.end) as u32;
-            let compose = text_state.compose_region.and_then(|span| {
-                let min = span.start.min(span.end);
-                let max = span.start.max(span.end);
-                match min == max {
-                    true => None,
-                    false => Some(min as u32..max as u32),
-                }
-            });
+            // let min = text_state.selection.start.min(text_state.selection.end) as u32;
+            // let max = text_state.selection.start.max(text_state.selection.end) as u32;
+            // let compose = text_state.compose_region.and_then(|span| {
+            //     let min = span.start.min(span.end);
+            //     let max = span.start.max(span.end);
+            //     match min == max {
+            //         true => None,
+            //         false => Some(min as u32..max as u32),
+            //     }
+            // });
 
-            let info = TextInputState {
-                text: text_state.text.clone(),
-                selection: min..max,
-                compose,
-            };
-            log::info!("Android set text input to {info:?}");
-            out.set_text_input(Some(info.clone()));
-            state.text_input = Some(info);
+            // let info = TextInputState {
+            //     text: text_state.text.clone(),
+            //     selection: min..max,
+            //     compose,
+            // };
+            log::info!("Android set text input to {text_state:?}");
+            // out.set_text_input(Some(info.clone()));
+            // state.text_input = Some(info);
         }
         _ => return InputStatus::Unhandled,
     }
@@ -507,17 +507,21 @@ fn draw_frame(state: &mut State) {
     );
 
     // Draw frame
-    let mut text_input = None;
+    state.input.millis = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .as_ref()
+        .map(Duration::as_millis)
+        .unwrap_or(0);
     if let Err(err) = state.app.draw_frame(
         &mut state.input,
         content_rect,
-        &mut text_input,
         state.fps,
         &mut Default::default(),
     ) {
         log::warn!("Failed to draw frame: {err:?}");
         return;
     }
+    let text_input = state.input.active_text_field.clone();
 
     // Handle text input
     state.input.update();
@@ -554,7 +558,7 @@ fn draw_frame(state: &mut State) {
         }
     }
 
-    if text_input.is_some() && text_input != state.text_input {
+    if text_input.is_some() && !text_input_eq(&text_input, &state.text_input) {
         let text = text_input.as_ref().expect("Can't happen");
         log::info!("Setting androids TextInput to {text_input:?}");
         state
@@ -562,8 +566,8 @@ fn draw_frame(state: &mut State) {
             .set_text_input_state(android_activity::input::TextInputState {
                 text: text.text.clone(),
                 selection: android_activity::input::TextSpan {
-                    start: text.selection.start as usize,
-                    end: text.selection.end as usize,
+                    start: text.cursor as usize,
+                    end: text.cursor as usize,
                 },
                 compose_region: text.compose.as_ref().map(|range| {
                     android_activity::input::TextSpan {
@@ -574,6 +578,18 @@ fn draw_frame(state: &mut State) {
             });
     }
     state.text_input = text_input;
+}
+
+fn text_input_eq(a: &Option<TextInputState>, b: &Option<TextInputState>) -> bool {
+    if let Some(a) = a {
+        if let Some(b) = b {
+            a.cursor == b.cursor && a.compose == b.compose
+        } else {
+            false
+        }
+    } else {
+        b.is_none()
+    }
 }
 
 /// Tries to map the `key_event` to a `KeyMapChar` containing a unicode character or dead key accent

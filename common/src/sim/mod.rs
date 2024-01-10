@@ -4,7 +4,7 @@ pub mod scene;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub struct TruthTableId(pub u16);
+pub struct TruthTableId(pub u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct NodeAddr(pub u32);
@@ -26,31 +26,32 @@ impl IntoIterator for NodeRange {
 }
 
 /// ### Representation:
-/// byte 0:
-///   bit 0 = state (0 = off, 1 = on),
-///   bits 2, 3: SourceTy
-///   bits 4..: unused
+/// - byte 0: state (0 = off, 1 = on) (or a node can hold a byte as it's state),
+/// - bytes 1..: source
 ///
-/// bytes 1-7: SourceData
-///
-#[derive(Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Clone, Copy, Default, Serialize, Deserialize, Debug)]
 #[repr(C)]
 pub struct Node(u64);
 impl Node {
     pub const ZERO: Self = Self(0);
 
-    pub const fn new(state: bool, src: Source) -> Self {
-        let state = ((state as u64) << 63) | (src.0 & 0x7FFFFFFFFFFFFFFF);
-        Self(state)
+    #[inline(always)]
+    pub fn toggle_state(&mut self) {
+        self.set_state(1u8.wrapping_sub(self.state()));
     }
 
     #[inline(always)]
-    pub const fn state(&self) -> bool {
-        (self.0 >> 63) == 1
+    pub fn new(state: u8, src: Source) -> Self {
+        Self(((state as u64) << 56) | (src.0 & 0x00FFFFFFFFFFFFFF))
+    }
+
+    #[inline(always)]
+    pub const fn state(&self) -> u8 {
+        (self.0 >> 56) as u8
     }
     #[inline(always)]
-    pub fn set_state(&mut self, state: bool) {
-        self.0 = (self.0 & 0x7FFFFFFFFFFFFFFF) | ((state as u64) << 63);
+    pub fn set_state(&mut self, state: u8) {
+        self.0 = (self.0 & 0x00FFFFFFFFFFFFFF) | ((state as u64) << 56);
     }
 
     #[inline(always)]
@@ -58,113 +59,125 @@ impl Node {
         Source(self.0)
     }
     #[inline(always)]
-    pub fn set_source(&mut self, source: Source) {
-        self.0 = (self.0 & 0x8000000000000000) | (source.0 & 0x7FFFFFFFFFFFFFFF);
-    }
-    #[inline(always)]
-    pub fn set_source_unchecked(&mut self, source: Source) {
-        self.0 = source.0;
+    pub fn set_source(&mut self, src: Source) {
+        self.0 = (self.0 & 0xFF00000000000000) | (src.0 & 0x00FFFFFFFFFFFFFF);
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
-#[repr(u8)]
-pub enum SourceTy {
-    None,
-    Copy,
-    Table,
-}
+#[derive(Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SourceTy(u8);
 impl SourceTy {
-    #[inline(always)]
-    pub const fn from_u8(v: u8) -> Option<Self> {
-        match v {
-            0 => Some(Self::None),
-            1 => Some(Self::Copy),
-            2 => Some(Self::Table),
-            _ => None,
-        }
-    }
-    #[inline(always)]
-    pub const fn as_u8(self) -> u8 {
-        match self {
-            Self::None => 0,
-            Self::Copy => 1,
-            Self::Table => 2,
-        }
-    }
+    pub const NONE: Self = Self(0);
+    pub const COPY: Self = Self(1);
+    pub const TABLE: Self = Self(2);
+    pub const OP: Self = Self(3);
 }
 
 #[derive(Clone, Copy)]
-pub struct Source(u64);
+#[repr(C)]
+pub struct CopySource(u64);
+impl CopySource {
+    #[inline(always)]
+    pub const fn new(addr: NodeAddr) -> Self {
+        Self(addr.0 as u64)
+    }
+
+    #[inline(always)]
+    pub const fn addr(&self) -> NodeAddr {
+        NodeAddr((self.0 & 0xFFFFFFFF) as u32)
+    }
+
+    #[inline(always)]
+    pub fn set_addr(&mut self, addr: NodeAddr) {
+        self.0 = (self.0 & !0xFFFFFFFF) | addr.0 as u64;
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+#[repr(C)]
+pub struct TruthTableSource(u64);
+impl TruthTableSource {
+    #[inline(always)]
+    pub const fn new(id: TruthTableId, output: u8, inputs: NodeAddr) -> Self {
+        Self(((id.0 as u64) << 40) | ((output as u64) << 32) | inputs.0 as u64)
+    }
+
+    #[inline(always)]
+    pub const fn id(&self) -> TruthTableId {
+        TruthTableId(((self.0 >> 40) & 0xFF) as u8)
+    }
+    #[inline(always)]
+    pub const fn output(&self) -> u8 {
+        ((self.0 >> 32) & 0xFF) as u8
+    }
+    #[inline(always)]
+    pub const fn inputs(&self) -> NodeAddr {
+        NodeAddr(self.0 as u32) // THIS GOOD?
+    }
+
+    #[inline(always)]
+    pub fn set_id(&mut self, id: TruthTableId) {
+        self.0 = (self.0 & 0xFFFF00FFFFFFFFFF) | ((id.0 as u64) << 40);
+    }
+    #[inline(always)]
+    pub fn set_output(&mut self, output: u8) {
+        self.0 = (self.0 & 0xFFFFFF00FFFFFFFF) | ((output as u64) << 32);
+    }
+    #[inline(always)]
+    pub fn set_inputs(&mut self, inputs: NodeAddr) {
+        self.0 = (self.0 & !0xFFFFFFFF) | inputs.0 as u64;
+    }
+}
+
+/// ### Representation:
+/// - byte 0: padding
+/// - byte 1: type: SourceTy
+/// - bytes 2..: data: TruthTableSource | NodeAddr
+///
+#[derive(Clone, Copy)]
+#[repr(C)]
+pub struct Source(pub u64);
 impl Source {
     #[inline(always)]
     pub const fn new_none() -> Self {
         Self(0)
     }
     #[inline(always)]
-    pub const fn new_table(table: TruthTableSource) -> Self {
-        Self(
-            ((SourceTy::Table.as_u8() as u64) << 56)
-                | ((table.inputs.0 as u64) << 24)
-                | ((table.output as u64) << 16)
-                | (table.id.0 as u64),
-        )
+    pub fn new_table(table: TruthTableSource) -> Self {
+        // Safety: TruthTableSource is always a valid u64.
+        let data: u64 = unsafe { std::mem::transmute(table) };
+        Self(((SourceTy::TABLE.0 as u64) << 48) | (data & 0x0000FFFFFFFFFFFF))
     }
     #[inline(always)]
-    pub const fn new_copy(addr: NodeAddr) -> Self {
-        Self(((SourceTy::Copy.as_u8() as u64) << 56) | ((addr.0 as u64) << 24))
+    pub const fn new_addr(addr: NodeAddr) -> Self {
+        Self(((SourceTy::COPY.0 as u64) << 48) | addr.0 as u64)
     }
 
     #[inline(always)]
-    pub fn ty(&self) -> SourceTy {
-        SourceTy::from_u8(((self.0 & 0x0300000000000000) >> 56) as u8).unwrap()
-    }
-
-    /// # Safety
-    /// self.0 must hold a valid representation of SourceTy at bits 2-3.
-    #[inline(always)]
-    pub const unsafe fn ty_unchecked(&self) -> SourceTy {
-        std::mem::transmute(((self.0 & 0x0300000000000000) >> 56) as u8)
-    }
-    #[inline(always)]
-    pub fn set_ty(&mut self, t: SourceTy) {
-        self.0 = (self.0 & 0x00FFFFFFFFFFFFFF) | (t.as_u8() as u64) << 56;
+    pub const fn ty(&self) -> SourceTy {
+        SourceTy(((self.0 & 0x00FF000000000000) >> 48) as u8)
     }
 
     #[inline(always)]
-    pub const fn table(&self) -> TruthTableSource {
-        TruthTableSource {
-            inputs: NodeAddr(((self.0 & 0x00FFFFFFFF000000) >> 24) as u32),
-            output: ((self.0 & 0x0000000000FF0000) >> 16) as u8,
-            id: TruthTableId((self.0 & 0x000000000000FFFF) as u16),
-        }
+    pub const fn as_table(&self) -> TruthTableSource {
+        unsafe { std::mem::transmute(*self) }
     }
     #[inline(always)]
-    pub fn set_table(&mut self, table: TruthTableSource) {
-        let bits =
-            ((table.inputs.0 as u64) << 24) | ((table.output as u64) << 16) | (table.id.0 as u64);
-        self.0 = (self.0 & 0xFF00000000000000) | bits;
+    pub const fn as_copy(&self) -> CopySource {
+        unsafe { std::mem::transmute(*self) }
     }
 
     #[inline(always)]
-    pub const fn addr(&self) -> NodeAddr {
-        NodeAddr(((self.0 & 0x00FFFFFFFF000000) >> 24) as u32)
+    pub fn as_copy_mut(&mut self) -> &mut CopySource {
+        unsafe { std::mem::transmute(self) }
     }
     #[inline(always)]
-    pub fn set_addr(&mut self, a: NodeAddr) {
-        self.0 = (self.0 & 0xFF00000000FFFFFF) | ((a.0 as u64) << 24);
+    pub fn as_table_mut(&mut self) -> &mut TruthTableSource {
+        unsafe { std::mem::transmute(self) }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-pub struct TruthTableSource {
-    pub inputs: NodeAddr, // implicitly a range of len 'table.num_inputs'
-    pub output: u8,
-    pub id: TruthTableId,
-}
-
-#[derive(Clone, Default, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize, Debug)]
 pub struct NodeRegion {
     pub min: NodeAddr,
     pub max: NodeAddr,
@@ -173,15 +186,14 @@ impl NodeRegion {
     pub fn map(&self, addr: NodeAddr) -> NodeAddr {
         NodeAddr(addr.0 + self.min.0)
     }
-
     pub fn map_src(&self, mut src: Source) -> Source {
-        if src.ty() == SourceTy::Copy {
-            src.set_addr(self.map(src.addr()));
+        if src.ty() == SourceTy::COPY {
+            let copy = src.as_copy_mut();
+            copy.set_addr(self.map(copy.addr()));
         }
-        if src.ty() == SourceTy::Table {
-            let mut table = src.table();
-            table.inputs = self.map(table.inputs);
-            src.set_table(table);
+        if src.ty() == SourceTy::TABLE {
+            let table = src.as_table_mut();
+            table.set_inputs(self.map(table.inputs()));
         }
         src
     }
@@ -257,27 +269,32 @@ impl Sim {
 
     fn update_node(node: Node, out: &mut Node, nodes: &[Node], tables: &[TruthTable]) {
         match node.source().ty() {
-            SourceTy::None => {}
-            SourceTy::Copy => out.set_state(nodes[node.source().addr().0 as usize].state()),
-            SourceTy::Table => {
-                let table_src = node.source().table();
-                let table = &tables[table_src.id.0 as usize];
-                let input_nodes = &nodes[table_src.inputs.0 as usize
-                    ..(table_src.inputs.0 as usize + table.num_inputs as usize)];
+            SourceTy::NONE => {}
+            SourceTy::COPY => {
+                out.set_state(nodes[node.source().as_copy().addr().0 as usize].state())
+            }
+            SourceTy::TABLE => {
+                let table_src = node.source().as_table();
+
+                let table = &tables[table_src.id().0 as usize];
+                let input_nodes = &nodes[table_src.inputs().0 as usize
+                    ..(table_src.inputs().0 as usize + table.num_inputs as usize)];
                 let mut input: u32 = 0;
                 for (idx, node) in input_nodes.iter().enumerate() {
                     input |= (node.state() as u32) << idx as u32;
                 }
                 let output = table.map[input as usize];
-                let x = table_src.output as u64;
+                let x = table_src.output() as u64;
                 let sel_output = ((output & (1u64 << x)) >> x) != 0;
-                out.set_state(sel_output);
+                out.set_state(sel_output as u8);
             }
+            x => panic!("encountered invalid source type in sim : {}", x.0),
         }
     }
 
     pub fn update(&mut self, tables: &[TruthTable]) {
         let mut new_nodes = self.nodes.clone();
+
         for (idx, node) in self.nodes.iter().enumerate() {
             Self::update_node(*node, &mut new_nodes[idx], &self.nodes, tables);
         }
