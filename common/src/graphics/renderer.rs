@@ -145,7 +145,7 @@ impl Renderer {
                 module: &shader_module,
                 entry_point: "fs_main",
                 targets: &[Some(ColorTargetState {
-                    format: TextureFormat::Rgba8UnormSrgb,
+                    format: gpu.surface_config.format,
                     blend: Some(BlendState::ALPHA_BLENDING),
                     write_mask: ColorWrites::ALL,
                 })],
