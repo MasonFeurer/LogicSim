@@ -1,4 +1,4 @@
-use crate::sim::scene::{Chip, Device, Scene, UNIT};
+use crate::sim::scene::{Scene, UNIT};
 use crate::ui::Transform;
 use egui::{Align2, Color32, Id, Painter, Rect, Sense, Ui};
 use glam::vec2;
@@ -97,7 +97,7 @@ pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid:
 
         label(p, t, bounds, device.name(), LabelPlacement::Top);
 
-        for (i, (addr, name, ty)) in device.l_nodes().iter().enumerate() {
+        for (i, (_addr, name, _ty)) in device.l_nodes().iter().enumerate() {
             // let is_input = matches!(ty, crate::sim::save::IoType::Input);
 
             let center = egui::pos2(bounds.min.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);
@@ -106,7 +106,7 @@ pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid:
             let bounds = Rect::from_center_size(center, egui::vec2(UNIT, UNIT));
             label(p, t, bounds, name, LabelPlacement::Left);
         }
-        for (i, (addr, name, ty)) in device.r_nodes().iter().enumerate() {
+        for (i, (_addr, name, _ty)) in device.r_nodes().iter().enumerate() {
             // let is_input = matches!(ty, crate::sim::save::IoType::Input);
 
             let center = egui::pos2(bounds.max.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);

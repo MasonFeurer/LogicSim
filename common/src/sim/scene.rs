@@ -2,7 +2,7 @@ use crate::sim::save::ChipAttrs;
 use crate::sim::{save, NodeAddr, NodeRegion, Sim};
 use crate::ui::Transform;
 
-use egui::{Color32 as Color, Rect};
+use egui::Rect;
 
 use glam::{vec2, Vec2};
 use serde::{Deserialize, Serialize};
@@ -69,13 +69,14 @@ pub struct ExternalNodes {
 }
 impl ExternalNodes {
     pub fn node_info(&self, side: Side, idx: u32) -> Option<NodeInfo> {
-        let pin_dir = match side {
+        let _pin_dir = match side {
             Side::Left => 1.0,
             Side::Right => -1.0,
         };
         let addr = self.states.get(idx as usize)?.0;
-        let x = todo!();
-        let y = todo!();
+        // TODO
+        let x = 0.0;
+        let y = 0.0;
         let pos = vec2(x, y);
         Some(NodeInfo { addr, pos })
     }

@@ -40,7 +40,7 @@ pub trait Page<P> {
     }
     fn title(&self) -> String;
     fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>);
-    fn on_close(&mut self, settings: &Settings, out: &mut PageOutput<P>) {}
+    fn on_close(&mut self, _settings: &Settings, _out: &mut PageOutput<P>) {}
 }
 
 pub struct HomePage;
@@ -80,7 +80,7 @@ impl<P: Platform> Page<P> for ProjectSelectPage {
         "Select a Project".into()
     }
 
-    fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>) {
+    fn draw(&mut self, ui: &mut Ui, _settings: &Settings, out: &mut PageOutput<P>) {
         if let Some(err) = &self.load_err {
             ui.label(format!("Failed to load project(s) : {err:?}"));
         }
@@ -120,7 +120,7 @@ impl<P: Platform> Page<P> for ProjectCreatePage {
         "Create a New Project".into()
     }
 
-    fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>) {
+    fn draw(&mut self, ui: &mut Ui, _settings: &Settings, out: &mut PageOutput<P>) {
         ui.label("Name");
         ui.text_edit_singleline(&mut self.name);
 
@@ -158,11 +158,11 @@ impl<P: Platform> Page<P> for SettingsPage {
         "Settings".into()
     }
 
-    fn on_close(&mut self, settings: &Settings, out: &mut PageOutput<P>) {
+    fn on_close(&mut self, _settings: &Settings, _out: &mut PageOutput<P>) {
         // TOOD: SAVE
     }
 
-    fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>) {
+    fn draw(&mut self, ui: &mut Ui, _settings: &Settings, out: &mut PageOutput<P>) {
         if ui.button("About").clicked() {
             out.push_page(InfoPage);
         }
@@ -175,7 +175,7 @@ impl<P: Platform> Page<P> for InfoPage {
         "About".into()
     }
 
-    fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>) {
+    fn draw(&mut self, ui: &mut Ui, _settings: &Settings, _out: &mut PageOutput<P>) {
         ui.heading("Logisim");
         ui.label("Version: indev (24-07-16)");
         ui.horizontal(|ui| {
@@ -291,14 +291,14 @@ pub struct WorkspacePage {
 impl WorkspacePage {
     pub fn new(project: Project) -> Self {
         let mut cats = vec![(String::from("Builtin"), vec![], false)];
-        let mut items = &mut cats[0].1;
+        let items = &mut cats[0].1;
         for idx in 0..BuiltinDeviceTy::COUNT {
             let device = BuiltinDeviceTy::from_u8(idx).unwrap();
             items.push(PlaceDevice::Builtin(device));
         }
         for category in project.library.categories() {
             cats.push((String::from(category), vec![], false));
-            let mut items = &mut cats.last_mut().unwrap().1;
+            let items = &mut cats.last_mut().unwrap().1;
             for (lib_idx, _chip) in project.library.chips_in_category(category) {
                 items.push(PlaceDevice::Chip(lib_idx));
             }
@@ -347,7 +347,7 @@ impl WorkspacePage {
         match device {
             PlaceDevice::Builtin(ty) => {
                 use crate::save::IoType;
-                use crate::sim::{scene, Node, SourceTy};
+                use crate::sim::{scene, Node};
 
                 let mut l_nodes = vec![];
                 let mut r_nodes = vec![];
@@ -356,22 +356,15 @@ impl WorkspacePage {
                     .sim
                     .alloc_region(input_count as u32 + output_count as u32);
 
-                fn io_ty(node: &Node) -> IoType {
-                    match node.source().ty() {
-                        SourceTy::NONE => IoType::Input,
-                        _ => IoType::Output,
-                    }
-                }
-
                 for i in 0..input_count {
                     let addr = region.map(i as u32);
                     scene.sim.set_node(addr, Node::default());
-                    l_nodes.push((addr, format!("input{i}"), IoType::Input));
+                    l_nodes.push((addr, format!("in{i}"), IoType::Input));
                 }
                 for i in 0..output_count {
                     let addr = region.map(i as u32 + input_count as u32);
                     scene.sim.set_node(addr, Node::default());
-                    l_nodes.push((addr, format!("output{i}"), IoType::Output));
+                    r_nodes.push((addr, format!("out{i}"), IoType::Output));
                 }
 
                 let device = scene::BuiltinDevice {
@@ -435,15 +428,15 @@ impl WorkspacePage {
     fn show_rpanel<P: Platform>(
         &mut self,
         ui: &mut Ui,
-        settings: &Settings,
-        out: &mut PageOutput<P>,
+        _settings: &Settings,
+        _out: &mut PageOutput<P>,
     ) {
         let mut place_device: Option<PlaceDevice> = None;
 
         let mut layout = ui.layout().clone();
         layout.cross_align = egui::Align::Center;
         ui.with_layout(layout, |ui| {
-            for (cat_name, items, open) in &mut self.items {
+            for (cat_name, _items, open) in &mut self.items {
                 let rs = ui.add_sized([80.0, 20.0], egui::Button::new(&*cat_name));
                 if rs.clicked() {
                     *open = !*open;
@@ -453,7 +446,7 @@ impl WorkspacePage {
                 }
             }
 
-            for (cat_name, items, open) in &self.items {
+            for (_cat_name, items, open) in &self.items {
                 if !*open {
                     continue;
                 }
@@ -482,8 +475,8 @@ impl WorkspacePage {
     fn show_tpanel<P: Platform>(
         &mut self,
         ui: &mut Ui,
-        settings: &Settings,
-        out: &mut PageOutput<P>,
+        _settings: &Settings,
+        _out: &mut PageOutput<P>,
     ) {
         if ui.button("options").clicked() {
             if self.toggle_menu(WorkspaceMenu::Options) {

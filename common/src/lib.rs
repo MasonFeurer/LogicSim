@@ -39,8 +39,8 @@ pub trait Platform {
     fn open_projects_dir() -> std::io::Result<()>;
 
     fn can_pick_file() -> bool;
-    async fn pick_file() -> std::io::Result<std::fs::File>;
-    async fn pick_files() -> std::io::Result<Vec<std::fs::File>>;
+    fn pick_file() -> impl std::future::Future<Output = std::io::Result<std::fs::File>> + Send;
+    fn pick_files() -> impl std::future::Future<Output = std::io::Result<Vec<std::fs::File>>> + Send;
 
     fn has_external_data() -> bool;
     fn download_external_data();

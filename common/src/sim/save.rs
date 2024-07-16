@@ -1,6 +1,6 @@
 use crate::sim::{self, scene, NodeRegion, TruthTable, TruthTableId};
 use egui::Color32 as Color;
-use glam::{vec2, Vec2};
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 pub type SaveId = crate::Id;

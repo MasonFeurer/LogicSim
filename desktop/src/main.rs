@@ -1,32 +1,75 @@
 #![windows_subsystem = "windows"]
 
+use logisim::glam::{ivec2, uvec2, IVec2, UVec2};
 use logisim::{app::App, egui, wgpu};
-use logisim::{save::Project, settings::Settings};
+use logisim::{save::Project, settings::Settings, Platform};
 use logisim_common as logisim;
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoopBuilder;
 use winit::window::Window;
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct WindowSettings {
+    pub pos: IVec2,
+    pub size: UVec2,
+    pub fullscreen: bool,
+}
+
+fn save_dir() -> PathBuf {
+    let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
+    dirs.data_dir().to_owned()
+}
+
+fn save_data<T: serde::Serialize>(
+    filename: &str,
+    data: &T,
+) -> Result<PathBuf, (PathBuf, std::io::Error)> {
+    let dir = save_dir();
+    _ = std::fs::create_dir(&dir);
+    let bytes = bincode::serialize(data).unwrap();
+    let path = dir.join(filename);
+    std::fs::write(&path, &bytes)
+        .map(|()| path.clone())
+        .map_err(|err| (path, err))
+}
+
+fn load_data<T: for<'a> serde::Deserialize<'a>>(filename: &str) -> std::io::Result<T> {
+    let dir = save_dir();
+    let bytes = std::fs::read(dir.join(filename))?;
+    bincode::deserialize(&bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to parse data from file {filename:?}"),
+        )
+    })
+}
+
 pub struct DesktopPlatform;
-impl logisim::Platform for DesktopPlatform {
+impl Platform for DesktopPlatform {
     fn load_settings() -> std::io::Result<Settings> {
-        todo!()
+        load_data("settings.data")
     }
     fn save_settings(settings: Settings) -> std::io::Result<()> {
-        todo!()
+        let rs = save_data("settings.data", &settings);
+        match &rs {
+            Ok(path) => log::info!("Saved settings to {path:?}"),
+            Err((path, err)) => log::warn!("Failed to save settings to {path:?} : {err:?}"),
+        }
+        rs.map(|_| ()).map_err(|(_path, err)| err)
     }
 
     #[rustfmt::skip]
     fn can_open_projects_dir() -> bool { true }
 
+    #[allow(unreachable_code)]
     fn open_projects_dir() -> std::io::Result<()> {
         use std::process::Command;
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir().display().to_string();
+        let dir = save_dir();
 
         println!("Notic: Attempting to open {dir:?}");
 
@@ -36,6 +79,8 @@ impl logisim::Platform for DesktopPlatform {
         return Command::new("explorer").arg(&dir).spawn().map(|_| ());
         #[cfg(target_os = "linux")]
         return Command::new("xdg-open").arg(&dir).spawn().map(|_| ());
+
+        // If none of the above compile flags pass:
         Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "Opending directory not implemented on this operating system",
@@ -43,12 +88,9 @@ impl logisim::Platform for DesktopPlatform {
     }
 
     fn list_available_projects() -> std::io::Result<Vec<String>> {
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir();
-
         let mut project_names: Vec<String> = Vec::new();
 
-        for entry in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
+        for entry in std::fs::read_dir(&save_dir())?.filter_map(Result::ok) {
             let path = entry.path();
             if path.extension() == Some(&std::ffi::OsString::from("project")) {
                 let name = if let Some(os_str) = path.file_stem() {
@@ -61,25 +103,14 @@ impl logisim::Platform for DesktopPlatform {
         }
         Ok(project_names)
     }
+
     fn load_project(name: &str) -> std::io::Result<Project> {
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir();
-        let filename = format!("{name}.project");
-        let bytes = std::fs::read(dir.join(filename))?;
-        bincode::deserialize(&bytes).map_err(|_| {
-            std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Failed to parse Project data from file",
-            )
-        })
+        load_data(&format!("{name}.project"))
     }
     fn save_project(name: &str, project: Project) -> std::io::Result<()> {
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir();
-        _ = std::fs::create_dir(dir);
-        let filename = format!("{name}.project");
-        let bytes = bincode::serialize(&project).unwrap();
-        std::fs::write(dir.join(filename), &bytes)
+        save_data(&format!("{name}.project"), &project)
+            .map(|_| ())
+            .map_err(|(_path, err)| err)
     }
 
     #[rustfmt::skip]
@@ -110,24 +141,6 @@ impl logisim::Platform for DesktopPlatform {
     fn name() -> String { "Desktop".into() }
 }
 
-struct SaveDirs {
-    settings: PathBuf,
-    library: PathBuf,
-    scene: PathBuf,
-}
-impl SaveDirs {
-    fn new() -> Self {
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir();
-        _ = std::fs::create_dir(dir);
-        Self {
-            settings: dir.join("settings.data"),
-            library: dir.join("library.data"),
-            scene: dir.join("scene.data"),
-        }
-    }
-}
-
 fn main() {
     env_logger::init();
     let event_loop = EventLoopBuilder::new().build().unwrap();
@@ -143,21 +156,18 @@ fn main() {
     let mut state = State {
         app: App::default(),
         input,
-        window,
+        window: Arc::new(window),
         wgpu: wgpu::Instance::new(Default::default()),
         last_frame_time: SystemTime::now(),
-        save_dirs: SaveDirs::new(),
 
         frame_count: 0,
         last_fps_update: SystemTime::now(),
         fps: 0,
     };
 
-    if let Ok(bytes) = std::fs::read(&state.save_dirs.settings) {
-        match bincode::deserialize(&bytes) {
-            Ok(settings) => state.app.settings = settings,
-            Err(err) => log::warn!("Failed to parse settings: {err:?}"),
-        }
+    match DesktopPlatform::load_settings() {
+        Ok(settings) => state.app.settings = settings,
+        Err(err) => log::warn!("Failed to parse settings: {err:?}"),
     }
 
     _ = event_loop.run(move |event, event_loop| {
@@ -172,10 +182,9 @@ fn main() {
 struct State {
     app: App<DesktopPlatform>,
     wgpu: wgpu::Instance,
-    window: Window,
+    window: Arc<Window>,
     input: egui_winit::State,
     last_frame_time: SystemTime,
-    save_dirs: SaveDirs,
     frame_count: u32,
     last_fps_update: SystemTime,
     fps: u32,
@@ -185,16 +194,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
     match event {
         Event::Resumed => {
             let size = <[u32; 2]>::from(state.window.inner_size()).into();
-            let surface = unsafe {
-                use winit::raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
-                state
-                    .wgpu
-                    .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
-                        raw_window_handle: state.window.raw_window_handle().unwrap(),
-                        raw_display_handle: state.window.raw_display_handle().unwrap(),
-                    })
-                    .unwrap()
-            };
+            let surface = state.wgpu.create_surface(state.window.clone()).unwrap();
 
             pollster::block_on(state.app.renew_surface(&state.wgpu, surface, size));
             state.app.update_size(size);
@@ -203,14 +203,16 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         Event::Suspended => println!("suspended"),
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
         Event::LoopExiting => {
-            let settings = bincode::serialize(&state.app.settings).unwrap();
-            match std::fs::write(&state.save_dirs.settings, settings) {
-                Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
-                Err(err) => log::warn!(
-                    "Failed to save settings to {:?} : {err:?}",
-                    state.save_dirs.settings
-                ),
-            }
+            _ = DesktopPlatform::save_settings(state.app.settings.clone());
+            let size = state.window.inner_size();
+            let pos = state.window.inner_position().unwrap_or(Default::default());
+            let fullscreen = state.window.fullscreen().is_some();
+            let win_settings = WindowSettings {
+                pos: ivec2(pos.x, pos.y),
+                size: uvec2(size.width, size.height),
+                fullscreen,
+            };
+            _ = save_data("window.data", &win_settings);
         }
         _ => {}
     }

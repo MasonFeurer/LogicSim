@@ -1,5 +1,4 @@
 use crate::gpu::Gpu;
-use crate::save::Project;
 use crate::settings::Settings;
 use crate::sim::save::{ChipSave, IoType};
 use crate::sim::scene::{Chip as SceneChip, Rotation, Scene};
