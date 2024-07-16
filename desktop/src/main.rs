@@ -9,9 +9,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoopBuilder;
-use winit::window::Window;
+use winit::window::{Fullscreen, Window};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct WindowSettings {
@@ -141,6 +142,16 @@ impl Platform for DesktopPlatform {
     fn name() -> String { "Desktop".into() }
 }
 
+fn set_fullscreen(window: &Window, fs: bool) {
+    match fs {
+        true => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
+        false => window.set_fullscreen(None),
+    }
+}
+fn get_fullscreen(window: &Window) -> bool {
+    window.fullscreen().is_some()
+}
+
 fn main() {
     env_logger::init();
     let event_loop = EventLoopBuilder::new().build().unwrap();
@@ -152,6 +163,12 @@ fn main() {
     let viewport_id = egui::Context::default().viewport_id();
 
     let input = egui_winit::State::new(egui::Context::default(), viewport_id, &window, None, None);
+
+    if let Ok(settings) = load_data::<WindowSettings>("window.data") {
+        set_fullscreen(&window, settings.fullscreen);
+        window.set_outer_position(PhysicalPosition::new(settings.pos.x, settings.pos.y));
+        _ = window.request_inner_size(PhysicalSize::new(settings.size.x, settings.size.y));
+    }
 
     let mut state = State {
         app: App::default(),
@@ -205,12 +222,11 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         Event::LoopExiting => {
             _ = DesktopPlatform::save_settings(state.app.settings.clone());
             let size = state.window.inner_size();
-            let pos = state.window.inner_position().unwrap_or(Default::default());
-            let fullscreen = state.window.fullscreen().is_some();
+            let pos = state.window.outer_position().unwrap_or(Default::default());
             let win_settings = WindowSettings {
                 pos: ivec2(pos.x, pos.y),
                 size: uvec2(size.width, size.height),
-                fullscreen,
+                fullscreen: get_fullscreen(&state.window),
             };
             _ = save_data("window.data", &win_settings);
         }

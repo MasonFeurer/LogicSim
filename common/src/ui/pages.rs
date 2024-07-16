@@ -163,9 +163,42 @@ impl<P: Platform> Page<P> for SettingsPage {
     }
 
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, out: &mut PageOutput<P>) {
+        use crate::settings::UiTheme;
+        let set = &mut self.0;
+
         if ui.button("About").clicked() {
             out.push_page(InfoPage);
         }
+
+        fn cycle<T: PartialEq + std::fmt::Debug + Clone>(
+            ui: &mut Ui,
+            label: &str,
+            value: &mut T,
+            options: &[T],
+        ) {
+            if options.into_iter().position(|v| v == &*value).is_none() {
+                *value = options[0].clone();
+            }
+            let label = format!("{label}{value:?}");
+            let rs = ui.button(label);
+            if rs.clicked() {
+                let idx = options.into_iter().position(|v| v == &*value).unwrap();
+                let new_idx = (idx + 1) % options.len();
+                *value = options[new_idx].clone();
+            }
+        }
+        cycle(
+            ui,
+            "Scale: ",
+            &mut set.ui_scale,
+            &[0.25, 0.5, 0.75, 1.0, 1.25, 1.50, 1.75, 2.0],
+        );
+        cycle(
+            ui,
+            "Theme: ",
+            &mut set.ui_theme,
+            &[UiTheme::Light, UiTheme::Dark, UiTheme::Night],
+        );
     }
 }
 
