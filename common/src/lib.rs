@@ -35,8 +35,8 @@ pub trait Platform {
     fn load_project(name: &str) -> std::io::Result<Project>;
     fn save_project(name: &str, project: Project) -> std::io::Result<()>;
 
-    fn can_open_projects_dir() -> bool;
-    fn open_projects_dir() -> std::io::Result<()>;
+    fn can_open_dirs() -> bool;
+    fn open_save_dir() -> std::io::Result<()>;
 
     fn can_pick_file() -> bool;
     fn pick_file() -> impl std::future::Future<Output = std::io::Result<std::fs::File>> + Send;

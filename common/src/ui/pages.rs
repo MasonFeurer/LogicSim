@@ -84,9 +84,6 @@ impl<P: Platform> Page<P> for ProjectSelectPage {
         if let Some(err) = &self.load_err {
             ui.label(format!("Failed to load project(s) : {err:?}"));
         }
-        if P::can_open_projects_dir() && ui.button("Open Directory").clicked() {
-            _ = P::open_projects_dir();
-        }
         for project in &self.projects {
             if ui.button(project).clicked() {
                 match P::load_project(project) {
@@ -158,16 +155,15 @@ impl<P: Platform> Page<P> for SettingsPage {
         "Settings".into()
     }
 
-    fn on_close(&mut self, _settings: &Settings, _out: &mut PageOutput<P>) {
-        // TOOD: SAVE
-    }
-
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, out: &mut PageOutput<P>) {
         use crate::settings::UiTheme;
         let set = &mut self.0;
 
         if ui.button("About").clicked() {
             out.push_page(InfoPage);
+        }
+        if P::can_open_dirs() && ui.button("Open Save Directory").clicked() {
+            _ = P::open_save_dir();
         }
 
         fn cycle<T: PartialEq + std::fmt::Debug + Clone>(
@@ -199,6 +195,7 @@ impl<P: Platform> Page<P> for SettingsPage {
             &mut set.ui_theme,
             &[UiTheme::Light, UiTheme::Dark, UiTheme::Night],
         );
+        out.update_settings = Some(self.0.clone());
     }
 }
 
@@ -255,12 +252,12 @@ impl WorkspaceMenu {
         match self {
             Self::Options => {
                 ui.heading("Options");
+                ui.small("saved project");
                 ui.separator();
                 if button(ui, "Close").clicked() {
                     page.open_menu = None;
                 }
-                if button(ui, "Save + Exit").clicked() {
-                    // TODO: SAVE
+                if button(ui, "Exit").clicked() {
                     out.pop_page = true;
                 }
                 let label = match page.snap_to_grid {
@@ -376,7 +373,7 @@ impl WorkspacePage {
             Corner::Br => vec2(center.x - size.x * 0.5, center.y - size.y * 0.5),
         };
 
-        println!("NOTICE: placing deivce: {device:?}");
+        log::info!("placing deivce: {device:?}");
         match device {
             PlaceDevice::Builtin(ty) => {
                 use crate::save::IoType;

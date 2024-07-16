@@ -53,6 +53,7 @@ fn load_data<T: for<'a> serde::Deserialize<'a>>(filename: &str) -> std::io::Resu
 pub struct DesktopPlatform;
 impl Platform for DesktopPlatform {
     fn load_settings() -> std::io::Result<Settings> {
+        log::info!("Reading settings.data...");
         load_data("settings.data")
     }
     fn save_settings(settings: Settings) -> std::io::Result<()> {
@@ -65,14 +66,14 @@ impl Platform for DesktopPlatform {
     }
 
     #[rustfmt::skip]
-    fn can_open_projects_dir() -> bool { true }
+    fn can_open_dirs() -> bool { true }
 
     #[allow(unreachable_code)]
-    fn open_projects_dir() -> std::io::Result<()> {
+    fn open_save_dir() -> std::io::Result<()> {
         use std::process::Command;
         let dir = save_dir();
 
-        println!("Notic: Attempting to open {dir:?}");
+        log::info!("Attempting to open {dir:?}");
 
         #[cfg(target_os = "macos")]
         return Command::new("open").arg(&dir).spawn().map(|_| ());
@@ -89,9 +90,11 @@ impl Platform for DesktopPlatform {
     }
 
     fn list_available_projects() -> std::io::Result<Vec<String>> {
+        let dir = save_dir();
+        log::info!("Looking for project files in {dir:?}");
         let mut project_names: Vec<String> = Vec::new();
 
-        for entry in std::fs::read_dir(&save_dir())?.filter_map(Result::ok) {
+        for entry in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
             let path = entry.path();
             if path.extension() == Some(&std::ffi::OsString::from("project")) {
                 let name = if let Some(os_str) = path.file_stem() {
@@ -106,12 +109,16 @@ impl Platform for DesktopPlatform {
     }
 
     fn load_project(name: &str) -> std::io::Result<Project> {
+        log::info!("Reading {name}.project...");
         load_data(&format!("{name}.project"))
     }
     fn save_project(name: &str, project: Project) -> std::io::Result<()> {
-        save_data(&format!("{name}.project"), &project)
-            .map(|_| ())
-            .map_err(|(_path, err)| err)
+        let rs = save_data(&format!("{name}.project"), &project);
+        match &rs {
+            Ok(path) => log::info!("Saved project {name:?} to {path:?}"),
+            Err((path, err)) => log::warn!("Failed to save project {name:?} to {path:?} : {err:?}"),
+        }
+        rs.map(|_| ()).map_err(|(_path, err)| err)
     }
 
     #[rustfmt::skip]
@@ -217,7 +224,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
             state.app.update_size(size);
             state.window.request_redraw();
         }
-        Event::Suspended => println!("suspended"),
+        Event::Suspended => log::info!("suspended"),
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
         Event::LoopExiting => {
             _ = DesktopPlatform::save_settings(state.app.settings.clone());

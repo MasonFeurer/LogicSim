@@ -91,8 +91,10 @@ pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid:
         device.pos_mut().y += t.inv() * rs.drag_delta().y;
 
         if snap_to_grid && ptr_released {
+            // TODO: fix NOT gate snapping to the middle of the grid
             let u = UNIT;
-            *device.pos_mut() = u * (device.pos() / u).round();
+            let off = device.size() * 0.5;
+            *device.pos_mut() = off + u * ((device.pos() - off) / u).round();
         }
 
         label(p, t, bounds, device.name(), LabelPlacement::Top);

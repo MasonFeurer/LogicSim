@@ -120,10 +120,14 @@ impl<P: Platform> App<P> {
                 page.draw(ui, &self.settings, &mut out);
             });
             if out.pop_page {
-                _ = self.pages.pop();
+                let mut page = self.pages.pop().unwrap();
+                page.on_close(&self.settings, &mut out);
             }
             if let Some(page) = out.push_page {
                 self.pages.push(page);
+            }
+            if let Some(settings) = out.update_settings {
+                self.settings = settings;
             }
         });
 
