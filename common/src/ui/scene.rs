@@ -1,3 +1,4 @@
+use crate::save::Library;
 use crate::sim::scene::{Scene, UNIT};
 use crate::ui::Transform;
 use egui::{Align2, Color32, Id, Painter, Rect, Sense, Ui};
@@ -23,7 +24,15 @@ fn label(p: &Painter, t: Transform, bounds: Rect, label: &str, place: LabelPlace
     p.text(t * pos, align2, label, Default::default(), Color32::WHITE);
 }
 
-pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid: bool) {
+pub fn show_scene(
+    ui: &mut Ui,
+    library: &Library,
+    scene: &mut Scene,
+    snap_to_grid: bool,
+    show_grid: bool,
+) {
+    scene.sim.update(&library.tables);
+
     let screen_size = ui.clip_rect().size();
     let screen_size = glam::vec2(screen_size.x, screen_size.y);
 
@@ -37,17 +46,6 @@ pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid:
         scene.transform.translate(vec2(drag.x, drag.y));
         scene.transform.zoom(vec2(x, y), zoom - 1.0, 0.1..=100.0);
     }
-
-    let ptr_released = ui.input(|state| {
-        state
-            .events
-            .iter()
-            .find(|event| match event {
-                egui::Event::PointerButton { pressed, .. } => !*pressed,
-                _ => false,
-            })
-            .is_some()
-    });
 
     let t = scene.transform;
     let p = ui.painter();
@@ -90,31 +88,47 @@ pub fn show_scene(ui: &mut Ui, scene: &mut Scene, snap_to_grid: bool, show_grid:
         device.pos_mut().x += t.inv() * rs.drag_delta().x;
         device.pos_mut().y += t.inv() * rs.drag_delta().y;
 
-        if snap_to_grid && ptr_released {
-            // TODO: fix NOT gate snapping to the middle of the grid
-            let u = UNIT;
+        if snap_to_grid && rs.drag_stopped() {
             let off = device.size() * 0.5;
-            *device.pos_mut() = off + u * ((device.pos() - off) / u).round();
+            *device.pos_mut() = off + UNIT * ((device.pos() - off) / UNIT).round();
         }
 
         label(p, t, bounds, device.name(), LabelPlacement::Top);
 
-        for (i, (_addr, name, _ty)) in device.l_nodes().iter().enumerate() {
-            // let is_input = matches!(ty, crate::sim::save::IoType::Input);
+        let colors = [Color32::BLACK, Color32::RED];
+
+        for (i, (addr, name, ty)) in device.l_nodes().iter().enumerate() {
+            let is_input = matches!(ty, crate::sim::save::IoType::Input);
+
+            let node = scene.sim.get_node(*addr);
+            let color = colors[node.state() as usize];
 
             let center = egui::pos2(bounds.min.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);
-            p.circle_filled(t * center, t * UNIT * 0.4, Color32::BLACK);
-
             let bounds = Rect::from_center_size(center, egui::vec2(UNIT, UNIT));
+
+            let rs = ui.interact(t * bounds, Id::from(format!("{id:?}l{i}")), Sense::click());
+            if rs.clicked() && is_input {
+                scene.sim.set_node(*addr, node.toggle_state());
+            }
+
+            p.circle_filled(t * center, t * UNIT * 0.4, color);
             label(p, t, bounds, name, LabelPlacement::Left);
         }
-        for (i, (_addr, name, _ty)) in device.r_nodes().iter().enumerate() {
-            // let is_input = matches!(ty, crate::sim::save::IoType::Input);
+        for (i, (addr, name, ty)) in device.r_nodes().iter().enumerate() {
+            let is_input = matches!(ty, crate::sim::save::IoType::Input);
+
+            let node = scene.sim.get_node(*addr);
+            let color = colors[node.state() as usize];
 
             let center = egui::pos2(bounds.max.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);
-            p.circle_filled(t * center, t * UNIT * 0.4, Color32::BLACK);
-
             let bounds = Rect::from_center_size(center, egui::vec2(UNIT, UNIT));
+
+            let rs = ui.interact(t * bounds, Id::from(format!("{id:?}r{i}")), Sense::click());
+            if rs.clicked() && is_input {
+                scene.sim.set_node(*addr, node.toggle_state());
+            }
+
+            p.circle_filled(t * center, t * UNIT * 0.4, color);
             label(p, t, bounds, name, LabelPlacement::Right);
         }
     }

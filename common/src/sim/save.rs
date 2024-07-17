@@ -127,7 +127,7 @@ impl StartingChip {
                 "HalfAdder",
                 &["a", "b"],
                 &["sum", "cout"],
-                Box::new([0b00, 0b10, 0b10, 0b01]),
+                Box::new([0b00, 0b01, 0b01, 0b10]),
             ),
             Self::Adder => create_basic_chip(
                 table_id,
@@ -135,7 +135,7 @@ impl StartingChip {
                 &["a", "b", "cin"],
                 &["sum", "cout"],
                 //inputs:  000   001   010   011   100   101   110   111
-                Box::new([0b00, 0b10, 0b10, 0b01, 0b10, 0b01, 0b01, 0b11]),
+                Box::new([0b00, 0b01, 0b01, 0b10, 0b01, 0b10, 0b10, 0b11]),
             ),
         };
         library.add_chip(chip);

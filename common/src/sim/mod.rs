@@ -41,8 +41,9 @@ impl Node {
     pub const ZERO: Self = Self(0);
 
     #[inline(always)]
-    pub fn toggle_state(&mut self) {
+    pub fn toggle_state(mut self) -> Self {
         self.set_state(1u8.wrapping_sub(self.state()));
+        self
     }
 
     #[inline(always)]

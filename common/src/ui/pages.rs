@@ -559,20 +559,15 @@ impl<P: Platform> Page<P> for WorkspacePage {
             self.open_scene = 0;
         }
 
-        let ptr_released = ui.input(|state| {
-            state
-                .events
-                .iter()
-                .find(|event| match event {
-                    egui::Event::PointerButton { pressed, .. } => !*pressed,
-                    _ => false,
-                })
-                .is_some()
-        });
-
         // Show scene
         if let Some(scene) = self.project.scenes.get_mut(self.open_scene) {
-            crate::ui::scene::show_scene(ui, scene, self.snap_to_grid, self.show_grid);
+            crate::ui::scene::show_scene(
+                ui,
+                &self.project.library,
+                scene,
+                self.snap_to_grid,
+                self.show_grid,
+            );
 
             // ----- Show Device Placing Cursor -----
             let t = scene.transform;
@@ -595,7 +590,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 self.cursor.pos.x += t.inv() * rs.drag_delta().x;
                 self.cursor.pos.y += t.inv() * rs.drag_delta().y;
 
-                if self.snap_to_grid && ptr_released {
+                if self.snap_to_grid && rs.drag_stopped() {
                     let u = UNIT;
                     self.cursor.pos = u * (self.cursor.pos / u).round();
                 }
