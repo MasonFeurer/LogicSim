@@ -1,8 +1,11 @@
 use crate::save::Library;
-use crate::sim::scene::{Scene, UNIT};
-use crate::ui::Transform;
-use egui::{Align2, Color32, Id, Painter, Rect, Sense, Ui};
-use glam::vec2;
+use crate::sim::scene::{NodeIdent, Scene, UNIT};
+use crate::sim::Source;
+use crate::ui::{pages::PageOutput, Transform};
+
+use egui::epaint::QuadraticBezierShape;
+use egui::{Align2, Color32, Id, Painter, Rect, Response, Sense, Stroke, Ui};
+use glam::{vec2, Vec2};
 
 enum LabelPlacement {
     Top,
@@ -24,13 +27,14 @@ fn label(p: &Painter, t: Transform, bounds: Rect, label: &str, place: LabelPlace
     p.text(t * pos, align2, label, Default::default(), Color32::WHITE);
 }
 
-pub fn show_scene(
+pub fn show_scene<P>(
     ui: &mut Ui,
     library: &Library,
     scene: &mut Scene,
     snap_to_grid: bool,
     show_grid: bool,
-) {
+    out: &mut PageOutput<P>,
+) -> Response {
     scene.sim.update(&library.tables);
 
     let screen_size = ui.clip_rect().size();
@@ -38,6 +42,7 @@ pub fn show_scene(
 
     // ----- Handle Pan + Zoom -----
     let rect = ui.available_rect_before_wrap();
+    // (return value)
     let rs = ui.interact(rect, Id::from("pan+zoom"), Sense::click_and_drag());
 
     if let Some(egui::Pos2 { x, y }) = ui.ctx().pointer_latest_pos() {
@@ -73,7 +78,7 @@ pub fn show_scene(
         }
     }
 
-    for (id, device) in &mut scene.devices {
+    for (device_id, device) in &mut scene.devices {
         let bounds = device.bounds();
         let color = Color32::from_gray(200);
 
@@ -81,7 +86,7 @@ pub fn show_scene(
 
         let rs = ui.interact(
             t * bounds,
-            Id::from("chip").with(id),
+            Id::from("chip").with(device_id),
             Sense::click_and_drag(),
         );
 
@@ -98,38 +103,166 @@ pub fn show_scene(
         let colors = [Color32::BLACK, Color32::RED];
 
         for (i, (addr, name, ty)) in device.l_nodes().iter().enumerate() {
-            let is_input = matches!(ty, crate::sim::save::IoType::Input);
-
             let node = scene.sim.get_node(*addr);
             let color = colors[node.state() as usize];
 
             let center = egui::pos2(bounds.min.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);
             let bounds = Rect::from_center_size(center, egui::vec2(UNIT, UNIT));
 
-            let rs = ui.interact(t * bounds, Id::from(format!("{id:?}l{i}")), Sense::click());
-            if rs.clicked() && is_input {
-                scene.sim.set_node(*addr, node.toggle_state());
+            let rs = ui.interact(
+                t * bounds,
+                Id::from(format!("{device_id:?}l{i}")),
+                Sense::click(),
+            );
+            if rs.clicked() {
+                out.clicked_node = Some((NodeIdent::DeviceL(*device_id, i as u32), *addr, *ty));
+            }
+            if rs.secondary_clicked() {
+                out.rclicked_node = Some((NodeIdent::DeviceL(*device_id, i as u32), *addr, *ty));
             }
 
             p.circle_filled(t * center, t * UNIT * 0.4, color);
             label(p, t, bounds, name, LabelPlacement::Left);
         }
         for (i, (addr, name, ty)) in device.r_nodes().iter().enumerate() {
-            let is_input = matches!(ty, crate::sim::save::IoType::Input);
-
             let node = scene.sim.get_node(*addr);
             let color = colors[node.state() as usize];
 
             let center = egui::pos2(bounds.max.x, bounds.min.y + i as f32 * UNIT + UNIT * 0.5);
             let bounds = Rect::from_center_size(center, egui::vec2(UNIT, UNIT));
 
-            let rs = ui.interact(t * bounds, Id::from(format!("{id:?}r{i}")), Sense::click());
-            if rs.clicked() && is_input {
-                scene.sim.set_node(*addr, node.toggle_state());
+            let rs = ui.interact(
+                t * bounds,
+                Id::from(format!("{device_id:?}r{i}")),
+                Sense::click(),
+            );
+            if rs.clicked() {
+                out.clicked_node = Some((NodeIdent::DeviceR(*device_id, i as u32), *addr, *ty));
+            }
+            if rs.secondary_clicked() {
+                out.rclicked_node = Some((NodeIdent::DeviceR(*device_id, i as u32), *addr, *ty));
             }
 
             p.circle_filled(t * center, t * UNIT * 0.4, color);
             label(p, t, bounds, name, LabelPlacement::Right);
         }
     }
+
+    // Draw Wires
+    let mut rm_wire = None;
+    for (idx, wire) in scene.wires.iter().enumerate() {
+        let Some(src) = scene.node_info(wire.input) else {
+            rm_wire = Some(idx);
+            continue;
+        };
+        let Some(dst) = scene.node_info(wire.output) else {
+            rm_wire = Some(idx);
+            continue;
+        };
+        let state = scene.sim.get_node(src.addr).state();
+        let clicked = draw_wire(
+            ui,
+            scene.transform,
+            state,
+            false,
+            src.pos,
+            dst.pos,
+            &wire.anchors,
+        );
+        if clicked {
+            rm_wire = Some(idx);
+        }
+    }
+    if let Some(idx) = rm_wire {
+        let wire = scene.wires.remove(idx);
+        if let Some(dst_info) = scene.node_info(wire.output) {
+            scene.sim.nodes[dst_info.addr.0 as usize].set_source(Source::new_none());
+        }
+    }
+    rs
+}
+
+pub fn draw_wire(
+    ui: &mut Ui,
+    t: Transform,
+    state: u8,
+    force_unhovered: bool,
+    start: Vec2,
+    end: Vec2,
+    anchors: &[Vec2],
+) -> bool {
+    use crate::ui::line_contains_point;
+
+    let mut points = std::iter::once(start)
+        .chain(anchors.iter().copied())
+        .chain(std::iter::once(end));
+    let mut lines = Vec::new();
+
+    let ptr = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+    let ptr = vec2(ptr.x, ptr.y);
+    let p = ui.painter();
+
+    let mut prev = points.next().unwrap();
+    for n in points {
+        lines.push((prev, n));
+        prev = n;
+    }
+
+    let hovered = !force_unhovered
+        && lines
+            .iter()
+            .any(|line| line_contains_point(*line, 10.0, t.inv() * ptr));
+
+    let colors = [Color32::from_rgb(64, 2, 0), Color32::from_rgb(235, 19, 12)];
+    let mut color = colors[(state == 1) as usize];
+    if hovered {
+        // color = color.darken(40);
+        color = Color32::BLACK;
+    }
+
+    let stroke = Stroke::new(2.0, color);
+
+    let mut prev: Option<(Vec2, Vec2)> = None;
+    for idx in 0..lines.len() {
+        let mut line = lines[idx];
+        let len = (line.1 - line.0).abs().length();
+
+        if idx > 0 {
+            line.0 += (line.1 - line.0).normalize() * (len * 0.5).min(40.0);
+        }
+        if idx != lines.len() - 1 {
+            line.1 += (line.0 - line.1).normalize() * (len * 0.5).min(40.0);
+        }
+
+        p.line_segment(
+            [
+                t * egui::pos2(line.0.x, line.0.y),
+                t * egui::pos2(line.1.x, line.1.y),
+            ],
+            stroke,
+        );
+        if let Some(prev) = prev {
+            let points = [prev.1, lines[idx].0, line.0];
+            let points = [
+                t * egui::pos2(points[0].x, points[0].y),
+                t * egui::pos2(points[1].x, points[1].y),
+                t * egui::pos2(points[2].x, points[2].y),
+            ];
+
+            p.add(QuadraticBezierShape {
+                points,
+                closed: false,
+                fill: Color32::TRANSPARENT,
+                stroke: stroke.into(),
+            });
+        }
+        prev = Some(line);
+    }
+    let any_click = ui.input(|state| {
+        state
+            .events
+            .iter()
+            .any(|event| matches!(event, egui::Event::PointerButton { pressed: true, .. }))
+    });
+    hovered && any_click
 }

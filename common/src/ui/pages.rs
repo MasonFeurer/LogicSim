@@ -1,8 +1,8 @@
-use crate::{
-    save::{Project, StartingChip},
-    sim::scene::{BuiltinDeviceTy, Scene, UNIT},
-};
+use crate::save::{IoType, Project, StartingChip};
+use crate::sim::scene::{BuiltinDeviceTy, NodeIdent, Scene, Wire, UNIT};
+use crate::sim::{NodeAddr, Source};
 use crate::{Platform, Settings};
+
 use egui::Ui;
 use glam::{vec2, Vec2};
 
@@ -10,6 +10,8 @@ pub struct PageOutput<P> {
     pub push_page: Option<Box<dyn Page<P>>>,
     pub pop_page: bool,
     pub update_settings: Option<Settings>,
+    pub clicked_node: Option<(NodeIdent, NodeAddr, IoType)>,
+    pub rclicked_node: Option<(NodeIdent, NodeAddr, IoType)>,
 }
 impl<P> Default for PageOutput<P> {
     fn default() -> Self {
@@ -17,6 +19,8 @@ impl<P> Default for PageOutput<P> {
             push_page: None,
             pop_page: false,
             update_settings: None,
+            clicked_node: None,
+            rclicked_node: None,
         }
     }
 }
@@ -309,6 +313,12 @@ impl Default for DeviceCursor {
     }
 }
 
+#[derive(Clone)]
+pub struct WirePlacement {
+    src: (NodeIdent, NodeAddr),
+    anchors: Vec<Vec2>,
+}
+
 pub struct WorkspacePage {
     pub project: Project,
     pub snap_to_grid: bool,
@@ -316,7 +326,9 @@ pub struct WorkspacePage {
     pub open_scene: usize,
     pub open_menu: Option<WorkspaceMenu>,
     pub items: Vec<(String, Vec<PlaceDevice>, bool)>,
+
     pub cursor: DeviceCursor,
+    pub wire_placement: Option<WirePlacement>,
 }
 impl WorkspacePage {
     pub fn new(project: Project) -> Self {
@@ -340,8 +352,10 @@ impl WorkspacePage {
             snap_to_grid: false,
             open_scene: 0,
             open_menu: None,
-            cursor: DeviceCursor::default(),
             items: cats,
+
+            cursor: DeviceCursor::default(),
+            wire_placement: None,
         }
     }
 }
@@ -376,7 +390,6 @@ impl WorkspacePage {
         log::info!("placing deivce: {device:?}");
         match device {
             PlaceDevice::Builtin(ty) => {
-                use crate::save::IoType;
                 use crate::sim::{scene, Node};
 
                 let mut l_nodes = vec![];
@@ -408,7 +421,6 @@ impl WorkspacePage {
                 scene.add_device(device);
             }
             PlaceDevice::Chip(id) => {
-                use crate::save::IoType;
                 use crate::sim::{scene, Node, SourceTy};
 
                 let mut l_nodes = vec![];
@@ -560,13 +572,14 @@ impl<P: Platform> Page<P> for WorkspacePage {
         }
 
         // Show scene
-        if let Some(scene) = self.project.scenes.get_mut(self.open_scene) {
-            crate::ui::scene::show_scene(
+        let scene_rs = if let Some(scene) = self.project.scenes.get_mut(self.open_scene) {
+            let scene_rs = crate::ui::scene::show_scene(
                 ui,
                 &self.project.library,
                 scene,
                 self.snap_to_grid,
                 self.show_grid,
+                out,
             );
 
             // ----- Show Device Placing Cursor -----
@@ -595,8 +608,75 @@ impl<P: Platform> Page<P> for WorkspacePage {
                     self.cursor.pos = u * (self.cursor.pos / u).round();
                 }
             }
+            Some(scene_rs)
         } else {
             self.open_scene -= 1;
+            None
+        };
+
+        // Update placing wire
+        if let Some((ident, addr, _ty)) = out.clicked_node {
+            if let Some(WirePlacement { src, anchors }) = self.wire_placement.clone() {
+                if src.0 != ident {
+                    self.wire_placement = None;
+
+                    let scene = &mut self.project.scenes[self.open_scene as usize];
+
+                    _ = scene.rm_wire_by_target(addr);
+
+                    let new_src = Source::new_addr(src.1);
+                    scene.sim.nodes[addr.0 as usize].set_source(new_src);
+                    scene.wires.push(Wire {
+                        input: src.0,
+                        output: ident,
+                        anchors,
+                    });
+                }
+            } else {
+                self.wire_placement = Some(WirePlacement {
+                    src: (ident, addr),
+                    anchors: vec![],
+                });
+            }
+        }
+        if let Some((_ident, addr, ty)) = out.rclicked_node {
+            if matches!(ty, IoType::Input) {
+                let scene = &mut self.project.scenes[self.open_scene as usize];
+                let node = scene.sim.get_node(addr);
+                scene.sim.set_node(addr, node.toggle_state());
+            }
+        }
+
+        // ---- Place Wire Anchors
+        if let Some(bg_rs) = scene_rs {
+            if bg_rs.clicked() {
+                let scene = &mut self.project.scenes[self.open_scene as usize];
+                let ptr_pos = bg_rs.interact_pointer_pos().unwrap();
+                let ptr_pos = vec2(ptr_pos.x, ptr_pos.y);
+                if let Some(WirePlacement { anchors, .. }) = &mut self.wire_placement {
+                    anchors.push(scene.transform.inv() * ptr_pos);
+                }
+            }
+        }
+
+        // ---- Draw Wire Being Placed ----
+        if let Some(WirePlacement { src, anchors }) = &self.wire_placement {
+            let scene = &mut self.project.scenes[self.open_scene as usize];
+            if let Some(info) = scene.node_info(src.0) {
+                let state = scene.sim.get_node(info.addr).state();
+
+                let dst = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                let dst = scene.transform.inv() * vec2(dst.x, dst.y);
+                crate::ui::scene::draw_wire(
+                    ui,
+                    scene.transform,
+                    state,
+                    true,
+                    info.pos,
+                    dst,
+                    anchors,
+                );
+            }
         }
 
         // Show top Panel

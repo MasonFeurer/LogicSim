@@ -163,7 +163,7 @@ impl Project {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum IoType {
     Input,
     Output,
