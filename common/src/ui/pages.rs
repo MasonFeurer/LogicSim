@@ -615,7 +615,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
         };
 
         // Update placing wire
-        if let Some((ident, addr, _ty)) = out.clicked_node {
+        if let Some((ident, addr, _ty)) = out.rclicked_node {
             if let Some(WirePlacement { src, anchors }) = self.wire_placement.clone() {
                 if src.0 != ident {
                     self.wire_placement = None;
@@ -639,7 +639,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 });
             }
         }
-        if let Some((_ident, addr, ty)) = out.rclicked_node {
+        if let Some((_ident, addr, ty)) = out.clicked_node {
             if matches!(ty, IoType::Input) {
                 let scene = &mut self.project.scenes[self.open_scene as usize];
                 let node = scene.sim.get_node(addr);

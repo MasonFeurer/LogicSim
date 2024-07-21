@@ -66,7 +66,7 @@ impl std::ops::Mul<egui::Vec2> for Transform {
     type Output = egui::Vec2;
     #[inline(always)]
     fn mul(self, v: egui::Vec2) -> egui::Vec2 {
-        v * self.scale + egui::vec2(self.offset.x, self.offset.y)
+        v * self.scale
     }
 }
 impl std::ops::Mul<egui::Pos2> for Transform {

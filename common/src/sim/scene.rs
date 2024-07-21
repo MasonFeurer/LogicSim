@@ -68,16 +68,12 @@ pub struct ExternalNodes {
     pub states: Vec<(NodeAddr, String)>,
 }
 impl ExternalNodes {
-    pub fn node_info(&self, side: Side, idx: u32) -> Option<NodeInfo> {
-        let _pin_dir = match side {
-            Side::Left => 1.0,
-            Side::Right => -1.0,
-        };
+    pub fn node_info(&self, idx: u32) -> Option<NodeInfo> {
         let addr = self.states.get(idx as usize)?.0;
-        // TODO
-        let x = 0.0;
-        let y = 0.0;
-        let pos = vec2(x, y);
+        let pos = vec2(
+            self.pos.x + UNIT * 0.5,
+            self.pos.y + UNIT * idx as f32 + UNIT * 0.5,
+        );
         Some(NodeInfo { addr, pos })
     }
 }
@@ -130,8 +126,8 @@ impl Scene {
 
     pub fn node_info(&self, ident: NodeIdent) -> Option<NodeInfo> {
         match ident {
-            NodeIdent::LExternal(idx) => self.l_nodes.node_info(Side::Left, idx),
-            NodeIdent::RExternal(idx) => self.r_nodes.node_info(Side::Right, idx),
+            NodeIdent::LExternal(idx) => self.l_nodes.node_info(idx),
+            NodeIdent::RExternal(idx) => self.r_nodes.node_info(idx),
             NodeIdent::DeviceL(id, idx) => self.devices.get(&id)?.node_info(Side::Left, idx),
             NodeIdent::DeviceR(id, idx) => self.devices.get(&id)?.node_info(Side::Right, idx),
         }
