@@ -5,6 +5,37 @@ use serde::{Deserialize, Serialize};
 
 pub type SaveId = crate::Id;
 
+pub fn create_chip_from_scene(scene: &crate::sim::scene::Scene) -> ChipSave {
+    let region_size = scene.sim.next_region;
+    let l_nodes = scene
+        .l_nodes
+        .states
+        .iter()
+        .map(|(addr, name)| (name.clone(), *addr, scene.sim.get_node(*addr)))
+        .collect();
+    let r_nodes = scene
+        .r_nodes
+        .states
+        .iter()
+        .map(|(addr, name)| (name.clone(), *addr, scene.sim.get_node(*addr)))
+        .collect();
+    let mut inner_nodes = Vec::new();
+    for device in scene.devices.values() {
+        for addr in device.sim_nodes() {
+            inner_nodes.push((addr, scene.sim.get_node(addr)));
+        }
+    }
+    ChipSave {
+        attrs: scene.save_attrs.clone(),
+        region_size,
+        builtin: false,
+        scene: Some(scene.clone()),
+        l_nodes,
+        r_nodes,
+        inner_nodes,
+    }
+}
+
 pub fn create_basic_chip(
     table_id: TruthTableId,
     name: &str,
@@ -215,13 +246,24 @@ impl Library {
     // }
 }
 
-#[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, PartialEq, Serialize, Deserialize, Debug)]
 #[repr(u8)]
 /// Specifies either [Sequential Logic](https://en.wikipedia.org/wiki/Sequential_logic) or
 /// [Combinational Logic](https://en.wikipedia.org/wiki/Combinational_logic).
 pub enum Logic {
     Sequential,
     Combinational,
+}
+impl Logic {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Sequential => Self::Combinational,
+            Self::Combinational => Self::Sequential,
+        }
+    }
+    pub fn cycle_in_place(&mut self) {
+        *self = (*self).cycle();
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Serialize, Deserialize)]

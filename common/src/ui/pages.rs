@@ -1,4 +1,4 @@
-use crate::save::{IoType, Project, StartingChip};
+use crate::save::{create_chip_from_scene, IoType, Project, StartingChip};
 use crate::sim::scene::{BuiltinDeviceTy, NodeIdent, Scene, Wire, UNIT};
 use crate::sim::{NodeAddr, Source};
 use crate::{Platform, Settings};
@@ -284,7 +284,49 @@ impl WorkspaceMenu {
                     out.push_page(SettingsPage(settings.clone()));
                 }
             }
-            Self::CreateChip => _ = ui.heading("Create Chip"),
+            Self::CreateChip => {
+                ui.heading("Pack Into Chip");
+                ui.separator();
+                let scene = &mut page.project.scenes[page.open_scene as usize];
+                ui.horizontal(|ui| {
+                    ui.label("Name: ");
+                    ui.text_edit_singleline(&mut scene.save_attrs.name);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Category: ");
+                    ui.text_edit_singleline(&mut scene.save_attrs.category);
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Logic: ");
+                    if button(ui, format!("{:?}", scene.save_attrs.logic)).clicked() {
+                        scene.save_attrs.logic.cycle_in_place();
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui.button("Create").clicked() {
+                        // self.scene.optimize();
+                        let save =
+                            create_chip_from_scene(&page.project.scenes[page.open_scene as usize]);
+                        page.project.scenes.remove(page.open_scene as usize);
+                        page.open_menu = None;
+
+                        if let Some(c) = page
+                            .project
+                            .library
+                            .chips
+                            .iter_mut()
+                            .find(|chip| chip.attrs.name == save.attrs.name)
+                        {
+                            *c = save;
+                        } else {
+                            page.project.library.chips.push(save);
+                        }
+                    }
+                    if ui.button("Cancel").clicked() {
+                        page.open_menu = None;
+                    }
+                });
+            }
             Self::Library => _ = ui.heading("Library"),
         }
     }
@@ -326,33 +368,21 @@ pub struct WorkspacePage {
     pub open_scene: usize,
     pub open_menu: Option<WorkspaceMenu>,
     pub items: Vec<(String, Vec<PlaceDevice>, bool)>,
+    pub device_count: usize,
 
     pub cursor: DeviceCursor,
     pub wire_placement: Option<WirePlacement>,
 }
 impl WorkspacePage {
     pub fn new(project: Project) -> Self {
-        let mut cats = vec![(String::from("Builtin"), vec![], false)];
-        let items = &mut cats[0].1;
-        for idx in 0..BuiltinDeviceTy::COUNT {
-            let device = BuiltinDeviceTy::from_u8(idx).unwrap();
-            items.push(PlaceDevice::Builtin(device));
-        }
-        for category in project.library.categories() {
-            cats.push((String::from(category), vec![], false));
-            let items = &mut cats.last_mut().unwrap().1;
-            for (lib_idx, _chip) in project.library.chips_in_category(category) {
-                items.push(PlaceDevice::Chip(lib_idx));
-            }
-        }
-
         Self {
             project,
             show_grid: true,
-            snap_to_grid: false,
+            snap_to_grid: true,
             open_scene: 0,
             open_menu: None,
-            items: cats,
+            items: vec![],
+            device_count: 0,
 
             cursor: DeviceCursor::default(),
             wire_placement: None,
@@ -360,6 +390,24 @@ impl WorkspacePage {
     }
 }
 impl WorkspacePage {
+    pub fn create_item_list(&mut self) {
+        let mut cats = vec![(String::from("Builtin"), vec![], false)];
+        let items = &mut cats[0].1;
+        for idx in 0..BuiltinDeviceTy::COUNT {
+            let device = BuiltinDeviceTy::from_u8(idx).unwrap();
+            items.push(PlaceDevice::Builtin(device));
+        }
+        for category in self.project.library.categories() {
+            cats.push((String::from(category), vec![], false));
+            let items = &mut cats.last_mut().unwrap().1;
+            for (lib_idx, _chip) in self.project.library.chips_in_category(category) {
+                items.push(PlaceDevice::Chip(lib_idx));
+            }
+        }
+        self.items = cats;
+        self.device_count = self.project.library.chips.len();
+    }
+
     pub fn toggle_menu(&mut self, menu: WorkspaceMenu) -> bool {
         if self.open_menu == Some(menu) {
             self.open_menu = None;
@@ -473,6 +521,9 @@ impl WorkspacePage {
         _settings: &Settings,
         _out: &mut PageOutput<P>,
     ) {
+        if self.project.library.chips.len() != self.device_count {
+            self.create_item_list();
+        }
         let mut place_device: Option<PlaceDevice> = None;
 
         let mut layout = ui.layout().clone();
@@ -706,7 +757,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 .resizable(false)
                 .collapsible(false)
                 .title_bar(false)
-                .max_width(100.0)
+                .max_width(200.0)
                 .show(ui.ctx(), |ui| {
                     let layout = ui.layout().clone().with_cross_align(egui::Align::Center);
                     ui.with_layout(layout, |ui| menu.show(self, ui, settings, out));
