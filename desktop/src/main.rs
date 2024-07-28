@@ -1,35 +1,173 @@
 #![windows_subsystem = "windows"]
 
+use logisim::glam::{ivec2, uvec2, vec2, IVec2, UVec2};
+use logisim::{app::App, egui, wgpu};
+use logisim::{save::Project, settings::Settings, Platform};
 use logisim_common as logisim;
 
-use logisim::glam::{vec2, Vec2};
-use logisim::input::{InputEvent, InputState, PtrButton, TextInputState};
-use logisim::{app::App, Rect};
-
 use std::path::PathBuf;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use std::time::{Duration, SystemTime};
 
-use winit::event::{ElementState, Event, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{Event, WindowEvent};
 use winit::event_loop::EventLoopBuilder;
-use winit::keyboard::{Key, NamedKey};
-use winit::window::Window;
+use winit::window::{Fullscreen, Window};
 
-struct SaveDirs {
-    settings: PathBuf,
-    library: PathBuf,
-    scene: PathBuf,
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct WindowSettings {
+    pub pos: IVec2,
+    pub size: UVec2,
+    pub fullscreen: bool,
 }
-impl SaveDirs {
-    fn new() -> Self {
-        let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
-        let dir = dirs.data_dir();
-        _ = std::fs::create_dir(dir);
-        Self {
-            settings: dir.join("settings.data"),
-            library: dir.join("library.data"),
-            scene: dir.join("scene.data"),
+
+fn save_dir() -> PathBuf {
+    let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
+    dirs.data_dir().to_owned()
+}
+
+fn save_data<T: serde::Serialize>(
+    filename: &str,
+    data: &T,
+) -> Result<PathBuf, (PathBuf, std::io::Error)> {
+    let dir = save_dir();
+    _ = std::fs::create_dir(&dir);
+    let bytes = bincode::serialize(data).unwrap();
+    let path = dir.join(filename);
+    std::fs::write(&path, &bytes)
+        .map(|()| path.clone())
+        .map_err(|err| (path, err))
+}
+
+fn load_data<T: for<'a> serde::Deserialize<'a>>(filename: &str) -> std::io::Result<T> {
+    let dir = save_dir();
+    let bytes = std::fs::read(dir.join(filename))?;
+    bincode::deserialize(&bytes).map_err(|_| {
+        std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Failed to parse data from file {filename:?}"),
+        )
+    })
+}
+
+static UI_SCALE: AtomicU32 = AtomicU32::new(100);
+
+pub struct DesktopPlatform;
+impl Platform for DesktopPlatform {
+    fn set_scale_factor(scale: f32) {
+        if scale >= 0.1 {
+            UI_SCALE.store((scale * 100.0).round() as u32, Ordering::Relaxed)
         }
     }
+
+    fn load_settings() -> std::io::Result<Settings> {
+        log::info!("Reading settings.data...");
+        load_data("settings.data")
+    }
+    fn save_settings(settings: Settings) -> std::io::Result<()> {
+        let rs = save_data("settings.data", &settings);
+        match &rs {
+            Ok(path) => log::info!("Saved settings to {path:?}"),
+            Err((path, err)) => log::warn!("Failed to save settings to {path:?} : {err:?}"),
+        }
+        rs.map(|_| ()).map_err(|(_path, err)| err)
+    }
+
+    #[rustfmt::skip]
+    fn can_open_dirs() -> bool { true }
+
+    #[allow(unreachable_code)]
+    fn open_save_dir() -> std::io::Result<()> {
+        use std::process::Command;
+        let dir = save_dir();
+
+        log::info!("Attempting to open {dir:?}");
+
+        #[cfg(target_os = "macos")]
+        return Command::new("open").arg(&dir).spawn().map(|_| ());
+        #[cfg(target_os = "windows")]
+        return Command::new("explorer").arg(&dir).spawn().map(|_| ());
+        #[cfg(target_os = "linux")]
+        return Command::new("xdg-open").arg(&dir).spawn().map(|_| ());
+
+        // If none of the above compile flags pass:
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Opending directory not implemented on this operating system",
+        ))
+    }
+
+    fn list_available_projects() -> std::io::Result<Vec<String>> {
+        let dir = save_dir();
+        log::info!("Looking for project files in {dir:?}");
+        let mut project_names: Vec<String> = Vec::new();
+
+        for entry in std::fs::read_dir(&dir)?.filter_map(Result::ok) {
+            let path = entry.path();
+            if path.extension() == Some(&std::ffi::OsString::from("project")) {
+                let name = if let Some(os_str) = path.file_stem() {
+                    os_str.to_string_lossy().to_string()
+                } else {
+                    String::from("")
+                };
+                project_names.push(name);
+            }
+        }
+        Ok(project_names)
+    }
+
+    fn load_project(name: &str) -> std::io::Result<Project> {
+        log::info!("Reading {name}.project...");
+        load_data(&format!("{name}.project"))
+    }
+    fn save_project(name: &str, project: Project) -> std::io::Result<()> {
+        let rs = save_data(&format!("{name}.project"), &project);
+        match &rs {
+            Ok(path) => log::info!("Saved project {name:?} to {path:?}"),
+            Err((path, err)) => log::warn!("Failed to save project {name:?} to {path:?} : {err:?}"),
+        }
+        rs.map(|_| ()).map_err(|(_path, err)| err)
+    }
+
+    #[rustfmt::skip]
+    fn can_pick_file() -> bool { true }
+
+    async fn pick_file() -> std::io::Result<std::fs::File> {
+        todo!()
+    }
+    async fn pick_files() -> std::io::Result<Vec<std::fs::File>> {
+        todo!()
+    }
+
+    #[rustfmt::skip]
+    fn has_external_data() -> bool { false }
+
+    fn download_external_data() {
+        panic!("Not supported")
+    }
+    fn upload_external_data() {
+        panic!("Not supported")
+    }
+
+    #[rustfmt::skip]
+    fn is_touchscreen() -> bool { false }
+	#[rustfmt::skip]
+    fn has_physical_keyboard() -> bool { true }
+	#[rustfmt::skip]
+    fn name() -> String { "Desktop".into() }
+}
+
+fn set_fullscreen(window: &Window, fs: bool) {
+    match fs {
+        true => window.set_fullscreen(Some(Fullscreen::Borderless(None))),
+        false => window.set_fullscreen(None),
+    }
+}
+fn get_fullscreen(window: &Window) -> bool {
+    window.fullscreen().is_some()
 }
 
 fn main() {
@@ -40,40 +178,31 @@ fn main() {
         .build(&event_loop)
         .unwrap();
 
+    let viewport_id = egui::Context::default().viewport_id();
+
+    let input = egui_winit::State::new(egui::Context::default(), viewport_id, &window, None, None);
+
+    if let Ok(settings) = load_data::<WindowSettings>("window.data") {
+        set_fullscreen(&window, settings.fullscreen);
+        window.set_outer_position(PhysicalPosition::new(settings.pos.x, settings.pos.y));
+        _ = window.request_inner_size(PhysicalSize::new(settings.size.x, settings.size.y));
+    }
+
     let mut state = State {
-        app: App::new(),
-        input: InputState::default(),
-        window,
+        app: App::default(),
+        input,
+        window: Arc::new(window),
+        wgpu: wgpu::Instance::new(Default::default()),
         last_frame_time: SystemTime::now(),
-        clipboard: arboard::Clipboard::new()
-            .map_err(|err| log::warn!("Failed to init system clipboard: {err:?}"))
-            .ok(),
-        text_input: None,
-        save_dirs: SaveDirs::new(),
-        ptr_press: None,
 
         frame_count: 0,
         last_fps_update: SystemTime::now(),
         fps: 0,
     };
 
-    if let Ok(bytes) = std::fs::read(&state.save_dirs.settings) {
-        match bincode::deserialize(&bytes) {
-            Ok(settings) => state.app.settings = settings,
-            Err(err) => log::warn!("Failed to parse settings: {err:?}"),
-        }
-    }
-    if let Ok(bytes) = std::fs::read(&state.save_dirs.library) {
-        match bincode::deserialize(&bytes) {
-            Ok(library) => state.app.library = library,
-            Err(err) => log::warn!("Failed to parse library: {err:?}"),
-        }
-    }
-    if let Ok(bytes) = std::fs::read(&state.save_dirs.scene) {
-        match bincode::deserialize(&bytes) {
-            Ok(scene) => state.app.scenes = scene,
-            Err(err) => log::warn!("Failed to parse scene: {err:?}"),
-        }
+    match DesktopPlatform::load_settings() {
+        Ok(settings) => state.app.settings = settings,
+        Err(err) => log::warn!("Failed to parse settings: {err:?}"),
     }
 
     _ = event_loop.run(move |event, event_loop| {
@@ -86,15 +215,11 @@ fn main() {
 }
 
 struct State {
-    app: App,
-    window: Window,
-    input: InputState,
+    app: App<DesktopPlatform>,
+    wgpu: wgpu::Instance,
+    window: Arc<Window>,
+    input: egui_winit::State,
     last_frame_time: SystemTime,
-    clipboard: Option<arboard::Clipboard>,
-    text_input: Option<TextInputState>,
-    save_dirs: SaveDirs,
-    ptr_press: Option<(PtrButton, Vec2, SystemTime)>,
-
     frame_count: u32,
     last_fps_update: SystemTime,
     fps: u32,
@@ -104,39 +229,24 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
     match event {
         Event::Resumed => {
             let size = <[u32; 2]>::from(state.window.inner_size()).into();
-            pollster::block_on(state.app.resume(&state.window, size));
+            let surface = state.wgpu.create_surface(state.window.clone()).unwrap();
+
+            pollster::block_on(state.app.renew_surface(&state.wgpu, surface, size));
             state.app.update_size(size);
             state.window.request_redraw();
         }
-        Event::Suspended => println!("suspended"),
+        Event::Suspended => log::info!("suspended"),
         Event::WindowEvent { event, .. } => on_window_event(state, event, exit),
         Event::LoopExiting => {
-            let settings = bincode::serialize(&state.app.settings).unwrap();
-            match std::fs::write(&state.save_dirs.settings, settings) {
-                Ok(_) => log::info!("Saved settings to {:?}", state.save_dirs.settings),
-                Err(err) => log::warn!(
-                    "Failed to save settings to {:?} : {err:?}",
-                    state.save_dirs.settings
-                ),
-            }
-
-            let library = bincode::serialize(&state.app.library).unwrap();
-            match std::fs::write(&state.save_dirs.library, library) {
-                Ok(_) => log::info!("Saved library to {:?}", state.save_dirs.library),
-                Err(err) => log::warn!(
-                    "Failed to save library to {:?} : {err:?}",
-                    state.save_dirs.library
-                ),
-            }
-
-            let scene = bincode::serialize(&state.app.scenes).unwrap();
-            match std::fs::write(&state.save_dirs.scene, scene) {
-                Ok(_) => log::info!("Saved scene to {:?}", state.save_dirs.scene),
-                Err(err) => log::warn!(
-                    "Failed to save scene to {:?} : {err:?}",
-                    state.save_dirs.scene
-                ),
-            }
+            _ = DesktopPlatform::save_settings(state.app.settings.clone());
+            let size = state.window.inner_size();
+            let pos = state.window.outer_position().unwrap_or(Default::default());
+            let win_settings = WindowSettings {
+                pos: ivec2(pos.x, pos.y),
+                size: uvec2(size.width, size.height),
+                fullscreen: get_fullscreen(&state.window),
+            };
+            _ = save_data("window.data", &win_settings);
         }
         _ => {}
     }
@@ -144,12 +254,16 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
 
 fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
     match event {
+        event if ctx.input.on_window_event(&ctx.window, &event).consumed => {}
         WindowEvent::RedrawRequested => {
-            let content_size = vec2(
-                ctx.window.inner_size().width as f32,
-                ctx.window.inner_size().height as f32,
+            let win_size = logisim::glam::uvec2(
+                ctx.window.inner_size().width,
+                ctx.window.inner_size().height,
             );
-            let content_rect = Rect::from_min_size(vec2(0.0, 0.0), content_size);
+            let content_rect = egui::Rect::from_min_size(
+                egui::pos2(0.0, 0.0),
+                egui::vec2(win_size.x as f32, win_size.y as f32),
+            );
 
             let redraw = SystemTime::now()
                 .duration_since(ctx.last_frame_time)
@@ -173,21 +287,44 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
                     }
                 }
 
-                ctx.input.millis = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)
-                    .as_ref()
-                    .map(Duration::as_millis)
-                    .unwrap_or(0);
                 ctx.last_frame_time = SystemTime::now();
-                if let Err(err) = ctx.app.draw_frame(
-                    &mut ctx.input,
+
+                let mut input = logisim::app::AppInput {
+                    egui_input: ctx.input.take_egui_input(&ctx.window),
+                    fps: ctx.fps,
                     content_rect,
-                    ctx.fps,
-                    &mut Default::default(),
-                ) {
-                    log::warn!("Failed to draw frame: {err:?}");
+                    win_size,
+                };
+
+                // scaling
+                {
+                    let input_scale = UI_SCALE.load(Ordering::Relaxed) as f32 * 0.01;
+                    let content_rect = {
+                        let size = vec2(win_size.x as f32, win_size.y as f32);
+                        let (min, max) = (vec2(0.0, 0.0), size / input_scale);
+                        egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
+                    };
+                    let egui_input = &mut input.egui_input;
+                    let viewport = egui_input
+                        .viewports
+                        .get_mut(&egui::viewport::ViewportId::ROOT)
+                        .unwrap();
+                    viewport.native_pixels_per_point = Some(input_scale);
+                    viewport.inner_rect = Some(content_rect);
+                    egui_input.screen_rect = Some(content_rect);
+
+                    egui_input
+                        .events
+                        .iter_mut()
+                        .for_each(|event| *event = scale_event(event, input_scale));
                 }
-                ctx.input.update();
+
+                match ctx.app.draw_frame(input) {
+                    Ok(platform_output) => ctx
+                        .input
+                        .handle_platform_output(&ctx.window, platform_output),
+                    Err(err) => log::warn!("Failed to draw frame: {err:?}"),
+                }
             }
             ctx.window.request_redraw();
         }
@@ -197,132 +334,26 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
             ctx.window.request_redraw();
         }
         WindowEvent::CloseRequested => *exit = true,
-        WindowEvent::CursorMoved { position, .. } => {
-            let pos: [f32; 2] = position.into();
-            ctx.input.on_event(InputEvent::Hover(pos.into()));
-        }
-        WindowEvent::MouseInput { state, button, .. } => {
-            let button = match button {
-                MouseButton::Left => PtrButton::LEFT,
-                MouseButton::Middle => PtrButton::MIDDLE,
-                MouseButton::Right => PtrButton::RIGHT,
-                MouseButton::Back => PtrButton::BACK,
-                MouseButton::Forward => PtrButton::FORWARD,
-                MouseButton::Other(id) => PtrButton::new(id),
-            };
-            let pos = ctx.input.ptr_pos();
-            if state == ElementState::Pressed {
-                ctx.input.on_event(InputEvent::Press(pos, button));
-                ctx.ptr_press = Some((button, pos, SystemTime::now()));
-            } else {
-                if let Some((press_button, press_pos, instant)) = ctx.ptr_press {
-                    // if we've pressed the same button at a close position within the past 2 seconds, register a click.
-                    if press_button == button
-                        && (pos - press_pos).abs().length_squared() < 5.0
-                        && SystemTime::now()
-                            .duration_since(instant)
-                            .map(|d| d.as_secs() < 2)
-                            .ok()
-                            == Some(true)
-                    {
-                        ctx.input.on_event(InputEvent::Click(press_pos, button));
-                    }
-                    ctx.ptr_press = None;
-                }
-                ctx.input.on_event(InputEvent::Release(button));
-            }
-        }
-        WindowEvent::MouseWheel { delta, .. } => match delta {
-            MouseScrollDelta::LineDelta(x, y) => ctx.input.on_event(InputEvent::Scroll(vec2(x, y))),
-            MouseScrollDelta::PixelDelta(pos) => ctx
-                .input
-                .on_event(InputEvent::Scroll(vec2(pos.x as f32, pos.y as f32))),
-        },
-        WindowEvent::TouchpadMagnify { delta, .. } => {
-            if !ctx.input.ptr_gone() {
-                ctx.input
-                    .on_event(InputEvent::Zoom(ctx.input.ptr_pos(), delta as f32))
-            }
-        }
-        WindowEvent::KeyboardInput { event, .. } => {
-            if matches!(event.state, ElementState::Pressed) {
-                match event.logical_key {
-                    Key::Named(key) => {
-                        if let Some(key) = translate_key(key) {
-                            ctx.input.on_event(InputEvent::PressKey(key));
-                        }
-                    }
-                    Key::Character(ref smol_str) => {
-                        if smol_str.as_str() == "v" && ctx.input.modifiers().cmd {
-                            // Paste command
-                            if let Some(text) =
-                                ctx.clipboard.as_mut().and_then(|cb| cb.get_text().ok())
-                            {
-                                ctx.input.on_event(InputEvent::Paste(text));
-                            }
-                            return;
-                        }
-                        if smol_str.as_str() == "c" && ctx.input.modifiers().cmd {
-                            // Copy command (For now we copy the entire active text field)
-                            if let Some(input) = &ctx.text_input {
-                                if let Some(clipboard) = &mut ctx.clipboard {
-                                    _ = clipboard.set_text(input.text.clone());
-                                }
-                            }
-                            return;
-                        }
-                        for ch in smol_str.as_str().chars() {
-                            ctx.input.on_event(InputEvent::Type(ch))
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            if matches!(event.state, ElementState::Released) {
-                if let Key::Named(key) = event.logical_key {
-                    if let Some(key) = translate_key(key) {
-                        ctx.input.on_event(InputEvent::ReleaseKey(key));
-                    }
-                }
-            }
-        }
         _ => {}
     }
 }
 
-fn translate_key(key: NamedKey) -> Option<logisim::input::Key> {
-    Some(match key {
-        NamedKey::Shift => logisim::input::Key::Shift,
-        NamedKey::Control => logisim::input::Key::Command,
-        NamedKey::Alt => logisim::input::Key::Option,
-
-        NamedKey::Backspace => logisim::input::Key::Backspace,
-        NamedKey::Enter => logisim::input::Key::Enter,
-        NamedKey::Escape => logisim::input::Key::Esc,
-        NamedKey::ArrowLeft => logisim::input::Key::Left,
-        NamedKey::ArrowRight => logisim::input::Key::Right,
-        NamedKey::ArrowUp => logisim::input::Key::Up,
-        NamedKey::ArrowDown => logisim::input::Key::Down,
-        NamedKey::Tab => logisim::input::Key::Tab,
-        NamedKey::Space => logisim::input::Key::Space,
-        NamedKey::Delete => logisim::input::Key::Delete,
-        NamedKey::Insert => logisim::input::Key::Insert,
-        NamedKey::Home => logisim::input::Key::Home,
-        NamedKey::End => logisim::input::Key::End,
-        NamedKey::PageUp => logisim::input::Key::PageUp,
-        NamedKey::PageDown => logisim::input::Key::PageDown,
-        NamedKey::F1 => logisim::input::Key::F1,
-        NamedKey::F2 => logisim::input::Key::F2,
-        NamedKey::F3 => logisim::input::Key::F3,
-        NamedKey::F4 => logisim::input::Key::F4,
-        NamedKey::F5 => logisim::input::Key::F5,
-        NamedKey::F6 => logisim::input::Key::F6,
-        NamedKey::F7 => logisim::input::Key::F7,
-        NamedKey::F8 => logisim::input::Key::F8,
-        NamedKey::F9 => logisim::input::Key::F9,
-        NamedKey::F10 => logisim::input::Key::F10,
-        NamedKey::F11 => logisim::input::Key::F11,
-        NamedKey::F12 => logisim::input::Key::F12,
-        _ => return None,
-    })
+fn scale_event(e: &egui::Event, scale: f32) -> egui::Event {
+    use egui::Event::*;
+    match e {
+        PointerMoved(pos) => PointerMoved(*pos / scale),
+        MouseMoved(delta) => MouseMoved(*delta / scale),
+        PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers,
+        } => PointerButton {
+            pos: *pos / scale,
+            button: *button,
+            pressed: *pressed,
+            modifiers: *modifiers,
+        },
+        e => e.clone(),
+    }
 }

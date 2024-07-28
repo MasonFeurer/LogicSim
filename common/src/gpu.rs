@@ -1,5 +1,4 @@
 use glam::{uvec2, UVec2};
-use raw_window_handle::{HasRawDisplayHandle, HasRawWindowHandle};
 use wgpu::*;
 
 #[derive(Debug)]
@@ -12,17 +11,15 @@ pub enum GpuError {
 pub struct Gpu {
     pub device: Device,
     pub queue: Queue,
-    pub surface: Surface,
+    pub surface: Surface<'static>,
     pub surface_config: SurfaceConfiguration,
 }
 impl Gpu {
-    pub async fn new<W: HasRawWindowHandle + HasRawDisplayHandle>(
+    pub async fn new(
         instance: &Instance,
-        window: &W,
+        surface: Surface<'static>,
         size: UVec2,
     ) -> Result<Self, GpuError> {
-        let surface = unsafe { instance.create_surface(window) }
-            .map_err(|e| GpuError::CreateSurfaceError(e.to_string()))?;
         let adapter = instance
             .request_adapter(&RequestAdapterOptions {
                 power_preference: PowerPreference::default(),
@@ -34,7 +31,7 @@ impl Gpu {
 
         let surface_config = surface
             .get_default_config(&adapter, size.x, size.y)
-            .expect("Surface should have connfig for this adapter");
+            .expect("Surface should have config for this adapter");
 
         let limits = Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits());
 
@@ -43,8 +40,8 @@ impl Gpu {
             .request_device(
                 &DeviceDescriptor {
                     label: None,
-                    features: Features::empty(),
-                    limits,
+                    required_features: Features::empty(),
+                    required_limits: limits,
                 },
                 None,
             )

@@ -8,6 +8,11 @@ pub struct TruthTableId(pub u8);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct NodeAddr(pub u32);
+impl From<u32> for NodeAddr {
+    fn from(v: u32) -> Self {
+        Self(v)
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct NodeRange(NodeAddr, NodeAddr);
@@ -36,8 +41,9 @@ impl Node {
     pub const ZERO: Self = Self(0);
 
     #[inline(always)]
-    pub fn toggle_state(&mut self) {
+    pub fn toggle_state(mut self) -> Self {
         self.set_state(1u8.wrapping_sub(self.state()));
+        self
     }
 
     #[inline(always)]
@@ -183,8 +189,8 @@ pub struct NodeRegion {
     pub max: NodeAddr,
 }
 impl NodeRegion {
-    pub fn map(&self, addr: NodeAddr) -> NodeAddr {
-        NodeAddr(addr.0 + self.min.0)
+    pub fn map(&self, addr: impl Into<NodeAddr>) -> NodeAddr {
+        NodeAddr(addr.into().0 + self.min.0)
     }
     pub fn map_src(&self, mut src: Source) -> Source {
         if src.ty() == SourceTy::COPY {
@@ -205,7 +211,7 @@ impl NodeRegion {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Default, Clone, Serialize, Deserialize)]
 pub struct TruthTable {
     pub num_inputs: u8,
     pub num_outputs: u8,
