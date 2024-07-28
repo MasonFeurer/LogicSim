@@ -1,12 +1,15 @@
 #![windows_subsystem = "windows"]
 
-use logisim::glam::{ivec2, uvec2, IVec2, UVec2};
+use logisim::glam::{ivec2, uvec2, vec2, IVec2, UVec2};
 use logisim::{app::App, egui, wgpu};
 use logisim::{save::Project, settings::Settings, Platform};
 use logisim_common as logisim;
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU32, Ordering},
+    Arc,
+};
 use std::time::{Duration, SystemTime};
 
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -50,8 +53,16 @@ fn load_data<T: for<'a> serde::Deserialize<'a>>(filename: &str) -> std::io::Resu
     })
 }
 
+static UI_SCALE: AtomicU32 = AtomicU32::new(100);
+
 pub struct DesktopPlatform;
 impl Platform for DesktopPlatform {
+    fn set_scale_factor(scale: f32) {
+        if scale >= 0.1 {
+            UI_SCALE.store((scale * 100.0).round() as u32, Ordering::Relaxed)
+        }
+    }
+
     fn load_settings() -> std::io::Result<Settings> {
         log::info!("Reading settings.data...");
         load_data("settings.data")
@@ -278,12 +289,35 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
 
                 ctx.last_frame_time = SystemTime::now();
 
-                let input = logisim::app::AppInput {
+                let mut input = logisim::app::AppInput {
                     egui_input: ctx.input.take_egui_input(&ctx.window),
                     fps: ctx.fps,
                     content_rect,
                     win_size,
                 };
+
+                // scaling
+                {
+                    let input_scale = UI_SCALE.load(Ordering::Relaxed) as f32 * 0.01;
+                    let content_rect = {
+                        let size = vec2(win_size.x as f32, win_size.y as f32);
+                        let (min, max) = (vec2(0.0, 0.0), size / input_scale);
+                        egui::Rect::from_min_max(egui::pos2(min.x, min.y), egui::pos2(max.x, max.y))
+                    };
+                    let egui_input = &mut input.egui_input;
+                    let viewport = egui_input
+                        .viewports
+                        .get_mut(&egui::viewport::ViewportId::ROOT)
+                        .unwrap();
+                    viewport.native_pixels_per_point = Some(input_scale);
+                    viewport.inner_rect = Some(content_rect);
+                    egui_input.screen_rect = Some(content_rect);
+
+                    egui_input
+                        .events
+                        .iter_mut()
+                        .for_each(|event| *event = scale_event(event, input_scale));
+                }
 
                 match ctx.app.draw_frame(input) {
                     Ok(platform_output) => ctx
@@ -301,5 +335,25 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
         }
         WindowEvent::CloseRequested => *exit = true,
         _ => {}
+    }
+}
+
+fn scale_event(e: &egui::Event, scale: f32) -> egui::Event {
+    use egui::Event::*;
+    match e {
+        PointerMoved(pos) => PointerMoved(*pos / scale),
+        MouseMoved(delta) => MouseMoved(*delta / scale),
+        PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers,
+        } => PointerButton {
+            pos: *pos / scale,
+            button: *button,
+            pressed: *pressed,
+            modifiers: *modifiers,
+        },
+        e => e.clone(),
     }
 }

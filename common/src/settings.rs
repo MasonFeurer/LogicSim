@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 pub enum UiTheme {
     Light,
     Dark,
-    Night,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

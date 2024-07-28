@@ -28,6 +28,8 @@ impl Id {
 }
 
 pub trait Platform {
+    fn set_scale_factor(scale: f32);
+
     fn load_settings() -> std::io::Result<Settings>;
     fn save_settings(settings: Settings) -> std::io::Result<()>;
 

@@ -123,3 +123,80 @@ impl Transform {
         self.offset += offset;
     }
 }
+
+pub fn create_visuals(theme: crate::settings::UiTheme) -> egui::Visuals {
+    use crate::settings::UiTheme;
+    use egui::{Color32, Rounding};
+    let mut vis = egui::Visuals::default();
+    vis.widgets.noninteractive.bg_stroke.width = 0.0;
+    vis.widgets.inactive.bg_stroke.width = 0.0;
+    vis.widgets.active.bg_stroke.width = 0.0;
+    vis.widgets.hovered.bg_stroke.width = 0.0;
+
+    match theme {
+        UiTheme::Light => {
+            // text color
+            vis.widgets.noninteractive.fg_stroke.color = Color32::from_gray(0);
+            vis.widgets.inactive.fg_stroke.color = Color32::from_gray(0);
+            vis.widgets.hovered.fg_stroke.color = Color32::from_gray(100);
+            vis.widgets.active.fg_stroke.color = Color32::from_gray(100);
+
+            // menu background
+            vis.panel_fill = Color32::from_gray(180);
+            vis.window_fill = Color32::from_gray(180);
+            // background
+            vis.widgets.noninteractive.bg_fill = Color32::from_gray(215);
+            // item rest color
+            vis.widgets.inactive.bg_fill = Color32::from_gray(200);
+            vis.widgets.inactive.weak_bg_fill = Color32::from_gray(200);
+            // item hover color
+            vis.widgets.hovered.bg_fill = Color32::from_gray(160);
+            vis.widgets.hovered.weak_bg_fill = Color32::from_gray(160);
+            // item interact color
+            vis.widgets.active.bg_fill = Color32::from_gray(200);
+            vis.widgets.active.weak_bg_fill = Color32::from_gray(200);
+
+            // text edit background
+            vis.extreme_bg_color = Color32::from_gray(220);
+
+            vis.hyperlink_color = Color32::from_rgb(0, 0, 200);
+            vis.selection.bg_fill = Color32::from_rgb(0, 0, 200);
+
+            vis.widgets.inactive.rounding = Rounding::ZERO;
+            vis.widgets.active.rounding = Rounding::ZERO;
+            vis.widgets.hovered.rounding = Rounding::ZERO;
+        }
+        UiTheme::Dark => {
+            // text color
+            vis.widgets.noninteractive.fg_stroke.color = Color32::from_gray(255);
+            vis.widgets.inactive.fg_stroke.color = Color32::from_gray(255);
+            vis.widgets.hovered.fg_stroke.color = Color32::from_gray(180);
+            vis.widgets.active.fg_stroke.color = Color32::from_gray(180);
+            // menu background
+            vis.panel_fill = Color32::from_gray(10);
+            vis.window_fill = Color32::from_gray(10);
+            // background
+            vis.widgets.noninteractive.bg_fill = Color32::from_gray(5);
+            // item rest color
+            vis.widgets.inactive.bg_fill = Color32::from_gray(50);
+            vis.widgets.inactive.weak_bg_fill = Color32::from_gray(50);
+            // item hover color
+            vis.widgets.hovered.bg_fill = Color32::from_gray(40);
+            vis.widgets.hovered.weak_bg_fill = Color32::from_gray(40);
+            // item interact color
+            vis.widgets.active.bg_fill = Color32::from_gray(50);
+            vis.widgets.active.weak_bg_fill = Color32::from_gray(50);
+
+            // text edit background
+            vis.extreme_bg_color = Color32::from_gray(0);
+
+            vis.hyperlink_color = Color32::from_rgb(0, 0, 200);
+            vis.selection.bg_fill = Color32::from_rgb(0, 0, 200);
+
+            vis.widgets.inactive.rounding = Rounding::ZERO;
+            vis.widgets.active.rounding = Rounding::ZERO;
+            vis.widgets.hovered.rounding = Rounding::ZERO;
+        }
+    }
+    vis
+}

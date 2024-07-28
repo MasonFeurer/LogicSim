@@ -197,7 +197,7 @@ impl<P: Platform> Page<P> for SettingsPage {
             ui,
             "Theme: ",
             &mut set.ui_theme,
-            &[UiTheme::Light, UiTheme::Dark, UiTheme::Night],
+            &[UiTheme::Light, UiTheme::Dark],
         );
         out.update_settings = Some(self.0.clone());
     }
@@ -211,7 +211,7 @@ impl<P: Platform> Page<P> for InfoPage {
 
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, _out: &mut PageOutput<P>) {
         ui.heading("Logisim");
-        ui.label("Version: indev (24-07-16)");
+        ui.label("Version: indev (24-07-27)");
         ui.horizontal(|ui| {
             ui.label("Github: ");
             ui.hyperlink_to(

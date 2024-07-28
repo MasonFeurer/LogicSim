@@ -101,6 +101,10 @@ impl<P: Platform> App<P> {
         let view = output.texture.create_view(&Default::default());
 
         let egui_output = self.egui.run(in_.egui_input, |ctx| {
+            // Update theme and scale
+            ctx.set_visuals(crate::ui::create_visuals(self.settings.ui_theme));
+            P::set_scale_factor(self.settings.ui_scale);
+
             let is_top_page = self.pages.len() == 1;
             let page = self.pages.last_mut().unwrap();
             let mut out = PageOutput::default();
