@@ -187,12 +187,7 @@ impl<P: Platform> Page<P> for SettingsPage {
                 *value = options[new_idx].clone();
             }
         }
-        cycle(
-            ui,
-            "Scale: ",
-            &mut set.ui_scale,
-            &[0.25, 0.5, 0.75, 1.0, 1.25, 1.50, 1.75, 2.0],
-        );
+        cycle(ui, "Scale: ", &mut set.ui_scale, &[0.5, 1.0, 1.5, 2.0, 2.5]);
         cycle(
             ui,
             "Theme: ",
@@ -211,7 +206,7 @@ impl<P: Platform> Page<P> for InfoPage {
 
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, _out: &mut PageOutput<P>) {
         ui.heading("Logisim");
-        ui.label("Version: indev (24-07-27)");
+        ui.label("Version: indev (24-07-29)");
         ui.horizontal(|ui| {
             ui.label("Github: ");
             ui.hyperlink_to(
@@ -428,6 +423,7 @@ impl WorkspacePage {
                 .preview(center, Default::default())
                 .size(),
         };
+        self.cursor.pos.y += size.y;
         let center = match corner {
             Corner::Tl => vec2(center.x + size.x * 0.5, center.y + size.y * 0.5),
             Corner::Tr => vec2(center.x - size.x * 0.5, center.y + size.y * 0.5),
@@ -529,36 +525,38 @@ impl WorkspacePage {
         let mut layout = ui.layout().clone();
         layout.cross_align = egui::Align::Center;
         ui.with_layout(layout, |ui| {
-            for (cat_name, _items, open) in &mut self.items {
-                let rs = ui.add_sized([80.0, 20.0], egui::Button::new(&*cat_name));
-                if rs.clicked() {
-                    *open = !*open;
-                }
-                if *open {
-                    rs.highlight();
-                }
-            }
-
-            for (_cat_name, items, open) in &self.items {
-                if !*open {
-                    continue;
-                }
-                ui.separator();
-                for device in items {
-                    let name = match device {
-                        PlaceDevice::Chip(lib_idx) => {
-                            self.project.library.chips[*lib_idx].attrs.name.clone()
-                        }
-                        PlaceDevice::Builtin(builtin) => format!("{builtin:?}"),
-                    };
-                    if ui
-                        .add_sized([80.0, 20.0], egui::Button::new(&*name))
-                        .clicked()
-                    {
-                        place_device = Some(*device);
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                for (cat_name, _items, open) in &mut self.items {
+                    let rs = ui.add_sized([80.0, 20.0], egui::Button::new(&*cat_name));
+                    if rs.clicked() {
+                        *open = !*open;
+                    }
+                    if *open {
+                        rs.highlight();
                     }
                 }
-            }
+
+                for (_cat_name, items, open) in &self.items {
+                    if !*open {
+                        continue;
+                    }
+                    ui.separator();
+                    for device in items {
+                        let name = match device {
+                            PlaceDevice::Chip(lib_idx) => {
+                                self.project.library.chips[*lib_idx].attrs.name.clone()
+                            }
+                            PlaceDevice::Builtin(builtin) => format!("{builtin:?}"),
+                        };
+                        if ui
+                            .add_sized([80.0, 20.0], egui::Button::new(&*name))
+                            .clicked()
+                        {
+                            place_device = Some(*device);
+                        }
+                    }
+                }
+            });
         });
         if let Some(device) = place_device {
             self.place_device(device);
@@ -638,9 +636,9 @@ impl<P: Platform> Page<P> for WorkspacePage {
             let p = ui.painter();
 
             {
-                let DeviceCursor { pos, corner: _ } = self.cursor;
+                let DeviceCursor { pos, corner } = self.cursor;
                 let pos = egui::pos2(pos.x, pos.y);
-                let rect = t * egui::Rect::from_min_size(pos, egui::vec2(20.0, 20.0));
+                let rect = t * egui::Rect::from_min_size(pos, egui::vec2(UNIT, UNIT));
 
                 let stroke = egui::Stroke::new(2.0, egui::Color32::WHITE);
                 p.line_segment([rect.min, egui::pos2(rect.min.x, rect.max.y)], stroke);

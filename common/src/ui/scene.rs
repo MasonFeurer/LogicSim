@@ -4,7 +4,7 @@ use crate::sim::{Sim, Source};
 use crate::ui::{pages::PageOutput, Transform};
 
 use egui::epaint::QuadraticBezierShape;
-use egui::{Align2, Button, Color32, Id, Painter, Rect, Response, Sense, Stroke, Ui};
+use egui::{Align2, Button, Color32, Id, Rect, Response, Sense, Stroke, Ui};
 use glam::{vec2, Vec2};
 
 #[derive(Clone, Copy)]
@@ -14,7 +14,14 @@ enum LabelPlacement {
     Right,
 }
 
-fn label(p: &Painter, t: Transform, bounds: Rect, label: &str, place: LabelPlacement) -> Rect {
+fn place_label(
+    ui: &mut Ui,
+    t: Transform,
+    bounds: Rect,
+    label: &str,
+    place: LabelPlacement,
+) -> Rect {
+    let color = ui.visuals().widgets.noninteractive.fg_stroke.color;
     // Place label above `bounds`, centerd
     let fsize = t.inv() * 15.0;
     let (pos, align2) = match place {
@@ -25,7 +32,18 @@ fn label(p: &Painter, t: Transform, bounds: Rect, label: &str, place: LabelPlace
         LabelPlacement::Left => (bounds.left_center(), Align2::RIGHT_CENTER),
         LabelPlacement::Right => (bounds.right_center(), Align2::LEFT_CENTER),
     };
-    p.text(t * pos, align2, label, Default::default(), Color32::WHITE)
+    ui.painter()
+        .text(t * pos, align2, label, Default::default(), color)
+}
+
+fn offset_color(color: Color32, off: i8) -> Color32 {
+    let [r, g, b, a] = color.to_array();
+    Color32::from_rgba_premultiplied(
+        (r as i32 + off as i32).clamp(0, 255) as u8,
+        (g as i32 + off as i32).clamp(0, 255) as u8,
+        (b as i32 + off as i32).clamp(0, 255) as u8,
+        a,
+    )
 }
 
 pub fn show_scene<P>(
@@ -40,6 +58,10 @@ pub fn show_scene<P>(
 
     let screen_size = ui.clip_rect().size();
     let screen_size = glam::vec2(screen_size.x, screen_size.y);
+
+    // Draw Background
+    ui.painter()
+        .rect_filled(ui.clip_rect(), 0.0, ui.visuals().panel_fill);
 
     // ----- Handle Pan + Zoom -----
     let rect = ui.available_rect_before_wrap();
@@ -64,7 +86,9 @@ pub fn show_scene<P>(
         // The number of lines to show across the width and height of the screen
         let line_count = screen_size / screen_gap;
 
-        let stroke = egui::Stroke::new(1.0, egui::Color32::from_gray(50));
+        let color = offset_color(ui.visuals().panel_fill, -5);
+
+        let stroke = egui::Stroke::new(1.0, color);
         for i in 0..(line_count.y.ceil()) as u32 {
             let y = i as f32 * screen_gap + screen_offset.y;
             let a = egui::pos2(0.0, y);
@@ -157,7 +181,7 @@ pub fn show_scene<P>(
             *device.pos_mut() = off + UNIT * ((device.pos() - off) / UNIT).round();
         }
 
-        label(ui.painter(), t, bounds, device.name(), LabelPlacement::Top);
+        place_label(ui, t, bounds, device.name(), LabelPlacement::Top);
 
         let colors = [Color32::BLACK, Color32::RED];
 
@@ -182,7 +206,7 @@ pub fn show_scene<P>(
 
             ui.painter()
                 .circle_filled(t * center, t * UNIT * 0.4, color);
-            label(ui.painter(), t, bounds, name, LabelPlacement::Left);
+            place_label(ui, t, bounds, name, LabelPlacement::Left);
         }
         for (i, (addr, name, ty)) in device.r_nodes().iter().enumerate() {
             let node = scene.sim.get_node(*addr);
@@ -205,7 +229,7 @@ pub fn show_scene<P>(
 
             ui.painter()
                 .circle_filled(t * center, t * UNIT * 0.4, color);
-            label(ui.painter(), t, bounds, name, LabelPlacement::Right);
+            place_label(ui, t, bounds, name, LabelPlacement::Right);
         }
     }
     if let Some(id) = rm_device {
@@ -229,20 +253,13 @@ pub fn draw_external_nodes<P>(
     };
 
     let w = UNIT;
-    let h = (en.states.len() as f32) * UNIT + UNIT;
+    let h = (en.states.len() as f32) * UNIT;
+    let bounds = t * Rect::from_min_size(egui::pos2(en.pos.x, en.pos.y), egui::vec2(w, h + UNIT));
 
-    let bounds = t * Rect::from_min_size(egui::pos2(en.pos.x, en.pos.y), egui::vec2(w, h));
-    let interact_bounds =
-        Rect::from_min_size(bounds.min, bounds.size() + t * (egui::Vec2::Y * UNIT));
+    // Interact
+    let rs = ui.interact(bounds, id, Sense::click_and_drag());
 
-    let rs = ui.interact(interact_bounds, id, Sense::click_and_drag());
-
-    {
-        let handle_c = ui.visuals().widgets.active.bg_fill;
-        ui.painter().rect_filled(interact_bounds, 0.0, handle_c);
-        ui.painter().rect_filled(bounds, 0.0, handle_c);
-    }
-
+    // Handle dragging
     en.pos.x += t.inv() * rs.drag_delta().x;
     en.pos.y += t.inv() * rs.drag_delta().y;
 
@@ -250,17 +267,16 @@ pub fn draw_external_nodes<P>(
         en.pos = UNIT * (en.pos / UNIT).round();
     }
 
-    let label_ = match side {
+    // Draw background
+    ui.painter()
+        .rect_filled(bounds, 0.0, offset_color(ui.visuals().panel_fill, 15));
+
+    // Draw Label
+    let label = match side {
         Side::Left => "left IO",
         Side::Right => "right IO",
     };
-    label(
-        ui.painter(),
-        t,
-        t.inv() * bounds,
-        label_,
-        LabelPlacement::Top,
-    );
+    place_label(ui, t, t.inv() * bounds, label, LabelPlacement::Top);
 
     // Draw Nodes
     let Vec2 { x, mut y } = t * (en.pos + vec2(0.5 * UNIT, 0.5 * UNIT));
@@ -325,9 +341,20 @@ pub fn draw_external_nodes<P>(
             if rs.lost_focus() {
                 ui.data_mut(|data| data.insert_temp(id, false));
             }
+            rs.request_focus();
+            if rs.gained_focus() {
+                let mut state = egui::TextEdit::load_state(ui.ctx(), rs.id).unwrap();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text_selection::CCursorRange {
+                        primary: egui::text::CCursor::new(name.chars().count()),
+                        secondary: egui::text::CCursor::new(0),
+                    }));
+                egui::TextEdit::store_state(ui.ctx(), rs.id, state);
+            }
         } else {
             // we are not editing the label
-            let label_rect = label(ui.painter(), t, bounds, name, label_placement);
+            let label_rect = place_label(ui, t, bounds, name, label_placement);
             if ui.interact(label_rect, id, Sense::click()).clicked() {
                 ui.data_mut(|data| data.insert_temp(id, true));
             }
@@ -377,7 +404,7 @@ pub fn draw_wire(
     let hovered = !force_unhovered
         && lines
             .iter()
-            .any(|line| line_contains_point(*line, 10.0, t.inv() * ptr));
+            .any(|line| line_contains_point(*line, 4.0, t.inv() * ptr));
     let hovered = hovered
         && ui
             .ctx()
@@ -386,11 +413,10 @@ pub fn draw_wire(
     let colors = [Color32::from_rgb(64, 2, 0), Color32::from_rgb(235, 19, 12)];
     let mut color = colors[(state == 1) as usize];
     if hovered {
-        // color = color.darken(40);
-        color = Color32::BLACK;
+        color = offset_color(color, 60);
     }
 
-    let stroke = Stroke::new(2.0, color);
+    let stroke = Stroke::new(t * 3.0, color);
 
     let mut prev: Option<(Vec2, Vec2)> = None;
     for idx in 0..lines.len() {
