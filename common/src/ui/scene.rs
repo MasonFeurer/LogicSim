@@ -69,10 +69,10 @@ pub fn show_scene<P>(
     let rs = ui.interact(rect, Id::from("pan+zoom"), Sense::click_and_drag());
 
     if let Some(egui::Pos2 { x, y }) = ui.ctx().pointer_latest_pos() {
-        let zoom = ui.ctx().input(|state| state.zoom_delta());
+        let zoom = (ui.ctx().input(|state| state.zoom_delta()) - 1.0) * 0.1;
         let drag = rs.drag_delta();
         scene.transform.translate(vec2(drag.x, drag.y));
-        scene.transform.zoom(vec2(x, y), zoom - 1.0, 0.1..=100.0);
+        scene.transform.zoom(vec2(x, y), zoom, 0.5..=20.0);
     }
 
     let t = scene.transform;

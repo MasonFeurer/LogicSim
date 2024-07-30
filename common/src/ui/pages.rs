@@ -186,8 +186,19 @@ impl<P: Platform> Page<P> for SettingsPage {
                 let new_idx = (idx + 1) % options.len();
                 *value = options[new_idx].clone();
             }
+            if rs.secondary_clicked() {
+                let idx = options.into_iter().position(|v| v == &*value).unwrap();
+                if idx > 0 {
+                    *value = options[idx - 1].clone();
+                }
+            }
         }
-        cycle(ui, "Scale: ", &mut set.ui_scale, &[0.5, 1.0, 1.5, 2.0, 2.5]);
+        cycle(
+            ui,
+            "Scale: ",
+            &mut set.ui_scale,
+            &[1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0],
+        );
         cycle(
             ui,
             "Theme: ",

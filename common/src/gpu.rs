@@ -11,7 +11,7 @@ pub enum GpuError {
 pub struct Gpu {
     pub device: Device,
     pub queue: Queue,
-    pub surface: Surface<'static>,
+    pub surface: std::mem::ManuallyDrop<wgpu::Surface<'static>>,
     pub surface_config: SurfaceConfiguration,
 }
 impl Gpu {
@@ -50,7 +50,7 @@ impl Gpu {
         Ok(Self {
             device,
             queue,
-            surface,
+            surface: std::mem::ManuallyDrop::new(surface),
             surface_config,
         })
     }

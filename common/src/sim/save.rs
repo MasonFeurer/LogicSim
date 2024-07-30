@@ -174,7 +174,7 @@ impl StartingChip {
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct Project {
     pub name: String,
     pub scenes: Vec<scene::Scene>,

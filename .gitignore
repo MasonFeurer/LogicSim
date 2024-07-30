@@ -1,8 +1,5 @@
 /target
-/android/gradle/wrapper/gradle-wrapper.jar
-/android/.gradle
-/android/app/build
-/android/app/src/main/jniLibs
+/android/android
 /web/target
 /web/site
 /README.html

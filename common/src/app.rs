@@ -57,6 +57,7 @@ impl<P: Platform> App<P> {
 
         self.gpu = Some(gpu);
         self.renderer = Some(renderer);
+        self.egui = egui::Context::default();
     }
 
     pub fn size(&self) -> UVec2 {
