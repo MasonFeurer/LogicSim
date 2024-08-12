@@ -132,14 +132,16 @@ impl Platform for DesktopPlatform {
         rs.map(|_| ()).map_err(|(_path, err)| err)
     }
 
-    #[rustfmt::skip]
-    fn can_pick_file() -> bool { true }
-
-    async fn pick_file() -> std::io::Result<std::fs::File> {
-        todo!()
+    fn delete_project(name: &str) -> std::io::Result<()> {
+        let name = format!("{name}.project");
+        log::info!("Deleting {name}...");
+        std::fs::remove_file(save_dir().join(name))
     }
-    async fn pick_files() -> std::io::Result<Vec<std::fs::File>> {
-        todo!()
+    fn rename_project(name: &str, new_name: &str) -> std::io::Result<()> {
+        let name = format!("{name}.project");
+        let new_name = format!("{new_name}.project");
+        log::info!("Renaming {name} to {new_name}...");
+        std::fs::rename(save_dir().join(name), save_dir().join(new_name))
     }
 
     #[rustfmt::skip]

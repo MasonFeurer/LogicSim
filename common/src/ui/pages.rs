@@ -54,20 +54,8 @@ impl<P: Platform> Page<P> for HomePage {
     }
 
     fn draw(&mut self, ui: &mut Ui, settings: &Settings, out: &mut PageOutput<P>) {
-        if ui.button("Open project").clicked() {
-            match P::list_available_projects() {
-                Ok(projects) => out.push_page(ProjectSelectPage {
-                    projects,
-                    load_err: None,
-                }),
-                Err(load_err) => out.push_page(ProjectSelectPage {
-                    projects: vec![],
-                    load_err: Some(load_err),
-                }),
-            }
-        }
-        if ui.button("Create project").clicked() {
-            out.push_page(ProjectCreatePage::default());
+        if ui.button("Select Project").clicked() {
+            out.push_page(ProjectSelectPage::new::<P>())
         }
         if ui.button("Settings").clicked() {
             out.push_page(SettingsPage(settings.clone()));
@@ -78,6 +66,33 @@ impl<P: Platform> Page<P> for HomePage {
 pub struct ProjectSelectPage {
     projects: Vec<String>,
     load_err: Option<std::io::Error>,
+    selected: Option<usize>,
+    rename: Option<String>,
+}
+impl ProjectSelectPage {
+    pub fn new<P: Platform>() -> Self {
+        let (projects, load_err) = match P::list_available_projects() {
+            Ok(projects) => (projects, None),
+            Err(load_err) => (vec![], Some(load_err)),
+        };
+        Self {
+            projects,
+            load_err,
+            selected: None,
+            rename: None,
+        }
+    }
+
+    pub fn reload<P: Platform>(&mut self) {
+        let (projects, load_err) = match P::list_available_projects() {
+            Ok(projects) => (projects, None),
+            Err(load_err) => (vec![], Some(load_err)),
+        };
+        self.projects = projects;
+        self.load_err = load_err;
+        self.rename = None;
+        self.selected = None;
+    }
 }
 impl<P: Platform> Page<P> for ProjectSelectPage {
     fn title(&self) -> String {
@@ -88,16 +103,67 @@ impl<P: Platform> Page<P> for ProjectSelectPage {
         if let Some(err) = &self.load_err {
             ui.label(format!("Failed to load project(s) : {err:?}"));
         }
-        for project in &self.projects {
-            if ui.button(project).clicked() {
-                match P::load_project(project) {
-                    Err(err) => self.load_err = Some(err),
-                    Ok(project) => {
-                        out.push_page(WorkspacePage::new(project));
-                    }
-                }
+        ui.horizontal(|ui| {
+            if ui.button("Create project").clicked() {
+                out.push_page(ProjectCreatePage::default());
             }
-        }
+            if P::can_open_dirs() && ui.button("Open Directory").clicked() {
+                _ = P::open_save_dir();
+            }
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (idx, project) in self.projects.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let selected = self.selected == Some(idx);
+                    let mut rs = ui.button(project);
+                    if selected {
+                        rs = rs.highlight();
+                    }
+                    if rs.clicked() {
+                        self.selected = Some(idx);
+                    }
+                });
+            }
+            let mut reload = false;
+            ui.separator();
+            if let Some(project) = self.selected.and_then(|i| self.projects.get(i)) {
+                if let Some(new_name) = &mut self.rename {
+                    ui.text_edit_singleline(new_name);
+                } else {
+                    ui.label(&*project);
+                }
+                ui.horizontal(|ui| {
+                    if ui.button("open").clicked() {
+                        match P::load_project(project) {
+                            Err(err) => self.load_err = Some(err),
+                            Ok(project) => {
+                                out.pop_page = true;
+                                out.push_page(WorkspacePage::new(project));
+                            }
+                        }
+                    }
+                    if let Some(new_name) = &self.rename {
+                        if ui.button("save").clicked() {
+                            P::rename_project(project, new_name);
+                            reload = true;
+                        }
+                    } else {
+                        if ui.button("rename").clicked() {
+                            self.rename = Some(project.clone());
+                        }
+                    }
+                    if ui.button("delete").clicked() {
+                        P::delete_project(project);
+                        reload = true;
+                    }
+                });
+            }
+            ui.add_space(50.0);
+            if reload {
+                self.reload::<P>();
+            }
+        });
     }
 }
 
@@ -126,14 +192,15 @@ impl<P: Platform> Page<P> for ProjectCreatePage {
         ui.text_edit_singleline(&mut self.name);
 
         ui.label("Starting chips:");
-        ui.horizontal(|ui| {
-            for idx in 0..StartingChip::COUNT {
-                let name = format!("{:?}", StartingChip::from_u8(idx).unwrap());
-                ui.checkbox(&mut self.include_chips[idx as usize], name);
-            }
+        egui::ScrollArea::horizontal().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                for idx in 0..StartingChip::COUNT {
+                    let name = format!("{:?}", StartingChip::from_u8(idx).unwrap());
+                    ui.checkbox(&mut self.include_chips[idx as usize], name);
+                }
+            });
+            ui.add_space(20.0);
         });
-
-        ui.add_space(20.0);
 
         ui.horizontal(|ui| {
             if ui.button("create").clicked() {
@@ -165,9 +232,6 @@ impl<P: Platform> Page<P> for SettingsPage {
 
         if ui.button("About").clicked() {
             out.push_page(InfoPage);
-        }
-        if P::can_open_dirs() && ui.button("Open Save Directory").clicked() {
-            _ = P::open_save_dir();
         }
 
         fn cycle<T: PartialEq + std::fmt::Debug + Clone>(

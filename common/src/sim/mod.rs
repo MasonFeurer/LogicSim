@@ -138,7 +138,7 @@ impl TruthTableSource {
 /// ### Representation:
 /// - byte 0: padding
 /// - byte 1: type: SourceTy
-/// - bytes 2..: data: TruthTableSource | NodeAddr
+/// - bytes 2..: data: TruthTableSource | CopySource
 ///
 #[derive(Clone, Copy)]
 #[repr(C)]
