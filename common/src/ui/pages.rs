@@ -280,13 +280,13 @@ impl<P: Platform> Page<P> for InfoPage {
     }
 
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, _out: &mut PageOutput<P>) {
-        ui.heading("Logisim");
+        ui.heading("Masons Logic Sim");
         ui.label("Version: indev (24-07-29)");
         ui.horizontal(|ui| {
             ui.label("Github: ");
             ui.hyperlink_to(
-                "MasonFeurer/Logisim",
-                "https://github.com/MasonFeurer/Logisim",
+                "MasonFeurer/MasonsLogicSim",
+                "https://github.com/MasonFeurer/MasonsLogicSim",
             );
         });
         let platform = format!(

@@ -3,7 +3,7 @@
 use logisim::glam::{ivec2, uvec2, vec2, IVec2, UVec2};
 use logisim::{app::App, egui, wgpu};
 use logisim::{save::Project, settings::Settings, Platform};
-use logisim_common as logisim;
+use mlsim_common as logisim;
 
 use std::path::PathBuf;
 use std::sync::{
@@ -25,7 +25,7 @@ pub struct WindowSettings {
 }
 
 fn save_dir() -> PathBuf {
-    let dirs = directories::ProjectDirs::from("com", "", "Logisim").unwrap();
+    let dirs = directories::ProjectDirs::from("com", "", "mlsim").unwrap();
     dirs.data_dir().to_owned()
 }
 
@@ -102,6 +102,7 @@ impl Platform for DesktopPlatform {
 
     fn list_available_projects() -> std::io::Result<Vec<String>> {
         let dir = save_dir();
+        _ = std::fs::create_dir(&dir);
         log::info!("Looking for project files in {dir:?}");
         let mut project_names: Vec<String> = Vec::new();
 
@@ -176,7 +177,7 @@ fn main() {
     env_logger::init();
     let event_loop = EventLoopBuilder::new().build().unwrap();
     let window = winit::window::WindowBuilder::new()
-        .with_title("Logisim")
+        .with_title("Masons Logic Sim")
         .build(&event_loop)
         .unwrap();
 

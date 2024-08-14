@@ -1,5 +1,5 @@
 [package]
-name = "logisim-android"
+name = "mlsim-android"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,13 +8,13 @@ name = "main"
 crate-type = ["cdylib"]
 
 [jano]
-name = "Logisim"
-app_id = "com.mason.logisim"
+name = "Masons Logic Sim"
+app_id = "com.mason.mlsim"
 version = "1.0.0"
 icon = "android/ic_launcher.png"
 
 [dependencies]
-logisim-common = { path = "../common" }
+mlsim-common = { path = "../common" }
 jano = { git = "https://github.com/MasonFeurer/Jano.git", features = ["wgpu", "egui"] }
 pollster = "0.3"
 log = "0.4"

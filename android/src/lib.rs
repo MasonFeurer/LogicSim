@@ -8,7 +8,7 @@ use jano::{wgpu, FrameStats, TouchTranslater, Window};
 use logisim::glam::{uvec2, vec2};
 use logisim::{app::App, egui};
 use logisim::{save::Project, settings::Settings, Platform};
-use logisim_common as logisim;
+use mlsim_common as logisim;
 
 use std::path::PathBuf;
 use std::sync::{

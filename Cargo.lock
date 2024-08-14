@@ -1254,50 +1254,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6163cb8c49088c2c36f57875e58ccd8c87c7427f7fbd50ea6710b2f3f2e8f"
 
 [[package]]
-name = "logisim-android"
-version = "0.1.0"
-dependencies = [
- "android-logd-logger",
- "bincode",
- "jano",
- "log",
- "logisim-common",
- "pollster",
- "raw-window-handle 0.6.2",
- "serde",
-]
-
-[[package]]
-name = "logisim-common"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "egui",
- "egui-wgpu",
- "fastrand",
- "glam",
- "image",
- "log",
- "serde",
- "wgpu",
-]
-
-[[package]]
-name = "logisim-desktop"
-version = "0.1.0"
-dependencies = [
- "bincode",
- "directories",
- "egui-winit",
- "env_logger 0.10.1",
- "log",
- "logisim-common",
- "pollster",
- "serde",
- "winit",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1353,6 +1309,50 @@ checksum = "e7810e0be55b428ada41041c41f32c9f1a42817901b4ccf45fa3d4b6561e74c7"
 dependencies = [
  "adler",
  "simd-adler32",
+]
+
+[[package]]
+name = "mlsim-android"
+version = "0.1.0"
+dependencies = [
+ "android-logd-logger",
+ "bincode",
+ "jano",
+ "log",
+ "mlsim-common",
+ "pollster",
+ "raw-window-handle 0.6.2",
+ "serde",
+]
+
+[[package]]
+name = "mlsim-common"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "egui",
+ "egui-wgpu",
+ "fastrand",
+ "glam",
+ "image",
+ "log",
+ "serde",
+ "wgpu",
+]
+
+[[package]]
+name = "mlsim-desktop"
+version = "0.1.0"
+dependencies = [
+ "bincode",
+ "directories",
+ "egui-winit",
+ "env_logger 0.10.1",
+ "log",
+ "mlsim-common",
+ "pollster",
+ "serde",
+ "winit",
 ]
 
 [[package]]
