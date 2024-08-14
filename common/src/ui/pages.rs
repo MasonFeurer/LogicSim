@@ -285,8 +285,8 @@ impl<P: Platform> Page<P> for InfoPage {
         ui.horizontal(|ui| {
             ui.label("Github: ");
             ui.hyperlink_to(
-                "MasonFeurer/MasonsLogicSim",
-                "https://github.com/MasonFeurer/MasonsLogicSim",
+                "MasonFeurer/LogicSim",
+                "https://github.com/MasonFeurer/LogicSim",
             );
         });
         let platform = format!(
