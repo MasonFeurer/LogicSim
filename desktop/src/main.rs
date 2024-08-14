@@ -1,9 +1,9 @@
 #![windows_subsystem = "windows"]
 
-use logisim::glam::{ivec2, uvec2, vec2, IVec2, UVec2};
-use logisim::{app::App, egui, wgpu};
-use logisim::{save::Project, settings::Settings, Platform};
-use mlsim_common as logisim;
+use mlsim_common::app::{App, AppInput};
+use mlsim_common::glam::{ivec2, uvec2, vec2, IVec2, UVec2};
+use mlsim_common::{egui, wgpu};
+use mlsim_common::{save::Project, settings::Settings, Platform};
 
 use std::path::PathBuf;
 use std::sync::{
@@ -259,7 +259,7 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
     match event {
         event if ctx.input.on_window_event(&ctx.window, &event).consumed => {}
         WindowEvent::RedrawRequested => {
-            let win_size = logisim::glam::uvec2(
+            let win_size = uvec2(
                 ctx.window.inner_size().width,
                 ctx.window.inner_size().height,
             );
@@ -292,7 +292,7 @@ fn on_window_event(ctx: &mut State, event: WindowEvent, exit: &mut bool) {
 
                 ctx.last_frame_time = SystemTime::now();
 
-                let mut input = logisim::app::AppInput {
+                let mut input = AppInput {
                     egui_input: ctx.input.take_egui_input(&ctx.window),
                     fps: ctx.fps,
                     content_rect,

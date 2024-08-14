@@ -5,10 +5,10 @@ use jano::android_activity::{
 use jano::android_activity::{AndroidApp, MainEvent};
 use jano::{wgpu, FrameStats, TouchTranslater, Window};
 
-use logisim::glam::{uvec2, vec2};
-use logisim::{app::App, egui};
-use logisim::{save::Project, settings::Settings, Platform};
-use mlsim_common as logisim;
+use mlsim_common::app::{App, AppInput};
+use mlsim_common::egui;
+use mlsim_common::glam::{uvec2, vec2};
+use mlsim_common::{save::Project, settings::Settings, Platform};
 
 use std::path::PathBuf;
 use std::sync::{
@@ -236,7 +236,7 @@ impl jano::AppState for State {
             egui::pos2(cutouts.1.x, cutouts.1.y),
         );
 
-        let mut input = logisim::app::AppInput {
+        let mut input = AppInput {
             egui_input: self.input.take(),
             fps: 0,
             content_rect,

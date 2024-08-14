@@ -281,7 +281,7 @@ impl<P: Platform> Page<P> for InfoPage {
 
     fn draw(&mut self, ui: &mut Ui, _settings: &Settings, _out: &mut PageOutput<P>) {
         ui.heading("Masons Logic Sim");
-        ui.label("Version: indev (24-07-29)");
+        ui.label("Version: indev (24-08-14)");
         ui.horizontal(|ui| {
             ui.label("Github: ");
             ui.hyperlink_to(
