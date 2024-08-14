@@ -59,7 +59,7 @@ pub fn create_basic_chip(
         builtin: true,
         scene: None,
         l_nodes: inputs
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(idx, name)| {
                 (
@@ -70,7 +70,7 @@ pub fn create_basic_chip(
             })
             .collect(),
         r_nodes: outputs
-            .into_iter()
+            .iter()
             .enumerate()
             .map(|(idx, name)| {
                 (

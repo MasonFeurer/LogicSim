@@ -336,7 +336,7 @@ pub fn draw_external_nodes<P>(
                     egui::vec2(w, 10.0),
                 ),
             };
-            let mut ui = ui.child_ui(field_rect, ui.layout().clone(), None);
+            let mut ui = ui.child_ui(field_rect, *ui.layout(), None);
             let rs = ui.put(field_rect, egui::TextEdit::singleline(name));
             if rs.lost_focus() {
                 ui.data_mut(|data| data.insert_temp(id, false));
@@ -365,7 +365,7 @@ pub fn draw_external_nodes<P>(
     // Draw [+] Button
     let button = Button::new("+").rounding(t * UNIT * 0.5);
     let rect = Rect::from_center_size(egui::pos2(x, y), t * egui::vec2(UNIT, UNIT));
-    let mut ui = ui.child_ui(rect, ui.layout().clone(), None);
+    let mut ui = ui.child_ui(rect, *ui.layout(), None);
     let rs = ui.put(rect, button);
     if rs.clicked() {
         en.states.push((sim.alloc_node(), String::from("unnamed")));

@@ -131,7 +131,7 @@ impl<P: Platform> Page<P> for ProjectSelectPage {
                 if let Some(new_name) = &mut self.rename {
                     ui.text_edit_singleline(new_name);
                 } else {
-                    ui.label(&*project);
+                    ui.label(project);
                 }
                 ui.horizontal(|ui| {
                     if ui.button("open").clicked() {
@@ -145,16 +145,14 @@ impl<P: Platform> Page<P> for ProjectSelectPage {
                     }
                     if let Some(new_name) = &self.rename {
                         if ui.button("save").clicked() {
-                            P::rename_project(project, new_name);
+                            _ = P::rename_project(project, new_name);
                             reload = true;
                         }
-                    } else {
-                        if ui.button("rename").clicked() {
-                            self.rename = Some(project.clone());
-                        }
-                    }
+                    } else if ui.button("rename").clicked() {
+                        self.rename = Some(project.clone());
+                    };
                     if ui.button("delete").clicked() {
-                        P::delete_project(project);
+                        _ = P::delete_project(project);
                         reload = true;
                     }
                 });
@@ -240,18 +238,18 @@ impl<P: Platform> Page<P> for SettingsPage {
             value: &mut T,
             options: &[T],
         ) {
-            if options.into_iter().position(|v| v == &*value).is_none() {
+            if !options.iter().any(|v| v == &*value) {
                 *value = options[0].clone();
             }
             let label = format!("{label}{value:?}");
             let rs = ui.button(label);
             if rs.clicked() {
-                let idx = options.into_iter().position(|v| v == &*value).unwrap();
+                let idx = options.iter().position(|v| v == &*value).unwrap();
                 let new_idx = (idx + 1) % options.len();
                 *value = options[new_idx].clone();
             }
             if rs.secondary_clicked() {
-                let idx = options.into_iter().position(|v| v == &*value).unwrap();
+                let idx = options.iter().position(|v| v == &*value).unwrap();
                 if idx > 0 {
                     *value = options[idx - 1].clone();
                 }
@@ -357,7 +355,7 @@ impl WorkspaceMenu {
             Self::CreateChip => {
                 ui.heading("Pack Into Chip");
                 ui.separator();
-                let scene = &mut page.project.scenes[page.open_scene as usize];
+                let scene = &mut page.project.scenes[page.open_scene];
                 ui.horizontal(|ui| {
                     ui.label("Name: ");
                     ui.text_edit_singleline(&mut scene.save_attrs.name);
@@ -375,9 +373,8 @@ impl WorkspaceMenu {
                 ui.horizontal(|ui| {
                     if ui.button("Create").clicked() {
                         // self.scene.optimize();
-                        let save =
-                            create_chip_from_scene(&page.project.scenes[page.open_scene as usize]);
-                        page.project.scenes.remove(page.open_scene as usize);
+                        let save = create_chip_from_scene(&page.project.scenes[page.open_scene]);
+                        page.project.scenes.remove(page.open_scene);
                         page.open_menu = None;
 
                         if let Some(c) = page
@@ -597,7 +594,7 @@ impl WorkspacePage {
         }
         let mut place_device: Option<PlaceDevice> = None;
 
-        let mut layout = ui.layout().clone();
+        let mut layout = *ui.layout();
         layout.cross_align = egui::Align::Center;
         ui.with_layout(layout, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
@@ -644,11 +641,9 @@ impl WorkspacePage {
         _settings: &Settings,
         _out: &mut PageOutput<P>,
     ) {
-        if ui.button("options").clicked() {
-            if self.toggle_menu(WorkspaceMenu::Options) {
-                if let Err(err) = P::save_project(&self.project.name, self.project.clone()) {
-                    log::warn!("Failed to save project {err:?}");
-                }
+        if ui.button("options").clicked() && self.toggle_menu(WorkspaceMenu::Options) {
+            if let Err(err) = P::save_project(&self.project.name, self.project.clone()) {
+                log::warn!("Failed to save project {err:?}");
             }
         }
         ui.label(&self.project.name);
@@ -711,7 +706,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
             let p = ui.painter();
 
             {
-                let DeviceCursor { pos, corner } = self.cursor;
+                let DeviceCursor { pos, corner: _ } = self.cursor;
                 let pos = egui::pos2(pos.x, pos.y);
                 let rect = t * egui::Rect::from_min_size(pos, egui::vec2(UNIT, UNIT));
 
@@ -744,7 +739,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 if src.0 != ident {
                     self.wire_placement = None;
 
-                    let scene = &mut self.project.scenes[self.open_scene as usize];
+                    let scene = &mut self.project.scenes[self.open_scene];
 
                     _ = scene.rm_wire_by_target(addr);
 
@@ -765,7 +760,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
         }
         if let Some((_ident, addr, ty)) = out.clicked_node {
             if matches!(ty, IoType::Input) {
-                let scene = &mut self.project.scenes[self.open_scene as usize];
+                let scene = &mut self.project.scenes[self.open_scene];
                 let node = scene.sim.get_node(addr);
                 scene.sim.set_node(addr, node.toggle_state());
             }
@@ -774,7 +769,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
         // ---- Place Wire Anchors
         if let Some(bg_rs) = scene_rs {
             if bg_rs.clicked() {
-                let scene = &mut self.project.scenes[self.open_scene as usize];
+                let scene = &mut self.project.scenes[self.open_scene];
                 let ptr_pos = bg_rs.interact_pointer_pos().unwrap();
                 let ptr_pos = vec2(ptr_pos.x, ptr_pos.y);
                 if let Some(WirePlacement { anchors, .. }) = &mut self.wire_placement {
@@ -785,7 +780,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
 
         // ---- Draw Wire Being Placed ----
         if let Some(WirePlacement { src, anchors }) = &self.wire_placement {
-            let scene = &mut self.project.scenes[self.open_scene as usize];
+            let scene = &mut self.project.scenes[self.open_scene];
             if let Some(info) = scene.node_info(src.0) {
                 let state = scene.sim.get_node(info.addr).state();
 
@@ -816,7 +811,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 egui::pos2(screen_rect.width() - rpanel_w, 0.0),
                 egui::vec2(rpanel_w, screen_rect.height()),
             );
-            let mut rpanel_ui = ui.child_ui(rpanel_rect, ui.layout().clone(), None);
+            let mut rpanel_ui = ui.child_ui(rpanel_rect, *ui.layout(), None);
 
             egui::Frame::menu(ui.style()).show(&mut rpanel_ui, |ui| {
                 self.show_rpanel(ui, settings, out);
@@ -832,7 +827,7 @@ impl<P: Platform> Page<P> for WorkspacePage {
                 .title_bar(false)
                 .max_width(200.0)
                 .show(ui.ctx(), |ui| {
-                    let layout = ui.layout().clone().with_cross_align(egui::Align::Center);
+                    let layout = (*ui.layout()).with_cross_align(egui::Align::Center);
                     ui.with_layout(layout, |ui| menu.show(self, ui, settings, out));
                 });
         }

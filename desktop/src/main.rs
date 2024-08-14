@@ -37,7 +37,7 @@ fn save_data<T: serde::Serialize>(
     _ = std::fs::create_dir(&dir);
     let bytes = bincode::serialize(data).unwrap();
     let path = dir.join(filename);
-    std::fs::write(&path, &bytes)
+    std::fs::write(&path, bytes)
         .map(|()| path.clone())
         .map_err(|err| (path, err))
 }
@@ -243,7 +243,7 @@ fn on_event(state: &mut State, event: Event<()>, exit: &mut bool) {
         Event::LoopExiting => {
             _ = DesktopPlatform::save_settings(state.app.settings.clone());
             let size = state.window.inner_size();
-            let pos = state.window.outer_position().unwrap_or(Default::default());
+            let pos = state.window.outer_position().unwrap_or_default();
             let win_settings = WindowSettings {
                 pos: ivec2(pos.x, pos.y),
                 size: uvec2(size.width, size.height),

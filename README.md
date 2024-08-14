@@ -1,5 +1,5 @@
 ## LogicSim
-A ardware-accelerated Logic Gate Simulator.
+A hardware-accelerated Logic Gate Simulator.
 
 ## How to Run
 There are not currently any pre-built binaries/APKS for the app, so for any platform, it must be built from source.
